@@ -1,0 +1,14 @@
+{
+  "name": "release-svp",
+  "version": "0.1.0",
+  "description": "Create pull requests based on Github labels",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc -p ."
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "typescript": "^5.5.3"
+  },
+  "private": true
+}
