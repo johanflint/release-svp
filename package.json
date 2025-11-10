@@ -4,10 +4,15 @@
   "description": "Create pull requests based on Github labels",
   "main": "dist/index.js",
   "scripts": {
-    "build": "tsc -p ."
+    "start": "node dist/src/index.js",
+    "build": "tsc -p .",
+    "watch": "tsc --watch"
   },
-  "dependencies": {},
+  "dependencies": {
+    "yargs": "^17.0.0"
+  },
   "devDependencies": {
+    "@types/yargs": "^17.0.34",
     "typescript": "^5.5.3"
   },
   "private": true
