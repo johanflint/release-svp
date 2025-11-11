@@ -1,4 +1,5 @@
 import * as yargs from "yargs";
+import { Github } from "./github";
 import { Repository } from "./repository";
 
 interface GitHubArgs {
@@ -27,6 +28,13 @@ const prepareCommand: yargs.CommandModule<{}, GitHubArgs> = {
         if (!repository.owner || !repository.repo) {
             console.error(`Invalid GitHub repository url '${args.repoUrl}, expected repository/owner format'`);
             return;
+        }
+
+        const github = new Github(repository, args.token ?? "");
+
+        const commitGenerator = github.mergeCommitIterator("main");
+        for await (const commit of commitGenerator) {
+            console.info(`Commit '${commit.sha}, associated pull request: ${commit.pullRequest?.number}`);
         }
 
         console.info(`Prepare release for repository '${repository.owner}/${repository.repo}'`);
