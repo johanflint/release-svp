@@ -1,5 +1,6 @@
 import * as yargs from "yargs";
 import { Github } from "./github";
+import { determineReleaseContext } from "./determineReleaseContext";
 import { Repository } from "./repository";
 
 interface GitHubArgs {
@@ -30,14 +31,11 @@ const prepareCommand: yargs.CommandModule<{}, GitHubArgs> = {
             return;
         }
 
-        const github = new Github(repository, args.token ?? "");
-
-        const commitGenerator = github.mergeCommitIterator("main");
-        for await (const commit of commitGenerator) {
-            console.info(`Commit '${commit.sha}, associated pull request: ${commit.pullRequest?.number}`);
-        }
-
         console.info(`Prepare release for repository '${repository.owner}/${repository.repo}'`);
+        const github = new Github(repository, args.token ?? "");
+        const releaseContext = await determineReleaseContext(github, "main");
+
+        console.info(`Previous release is 'v${releaseContext.previousRelease}', ${releaseContext.unreleasedCommits.length} unreleased commit(s)`);
     },
     command: "prepare",
     describe: "Create or update a pull request representing the next release"

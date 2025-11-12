@@ -1,6 +1,7 @@
 import { Octokit } from "octokit";
 import { Commit, PullRequest } from "./commit";
 import { Repository } from "./repository";
+import { Tag } from "./tag";
 
 export class Github {
     private readonly repository: Repository;
@@ -12,6 +13,97 @@ export class Github {
         this.octokit = new Octokit({
             auth: process.env.GITHUB_TOKEN || token,
         });
+    }
+
+    async *tagIterator(maxResults?: number) {
+        let cursor: string | undefined = undefined;
+        let results = 0;
+        const maxAllowedResults = maxResults ?? Number.MAX_SAFE_INTEGER;
+        while (results < maxAllowedResults) {
+            const response = await this.tagsGraphQL(cursor);
+
+            if (!response) {
+                break;
+            }
+
+            for (let x = 0; x < response.data.length; x++) {
+                results += 1;
+                yield response.data[x];
+            }
+
+            if (!response.pageInfo.hasNextPage) {
+                break;
+            }
+
+            cursor = response.pageInfo.endCursor;
+        }
+    }
+
+    private async tagsGraphQL(cursor?: string): Promise<Tags | null> {
+        console.debug(`Fetching tags with cursor '${cursor}...`);
+        const query = `
+            query latestTags($owner: String!, $repo: String!, $count: Int!, $cursor: String) {
+                repository(owner:$owner, name: $repo) {
+                    refs(refPrefix: "refs/tags/", first: $count, after: $cursor, orderBy: { field: TAG_COMMIT_DATE, direction: DESC}) {
+                        nodes {
+                            name
+                            target {
+                                ... on Commit {
+                                    oid
+                                    committedDate
+                                    messageHeadline
+                                }
+                                ... on Tag {
+                                    tagger {
+                                        name
+                                        date
+                                    }
+                                    target {
+                                        oid
+                                        ... on Commit {
+                                            committedDate
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        pageInfo {
+                            hasNextPage
+                            endCursor
+                        }
+                    }
+                }
+            }
+        `;
+
+        const parameters = {
+            cursor,
+            owner: this.repository.owner,
+            repo: this.repository.repo,
+            count: 10,
+        };
+        const response: any = await this.octokit.graphql(query, parameters);
+
+        if (!response) {
+            console.warn(`No response received for query: ${query}`, parameters)
+            return null;
+        }
+
+        const refs = response.repository.refs;
+        const tags = (refs.nodes || []) as GraphQLTag[];
+
+        const mappedTags = tags.map<Tag>(tag => {
+            const target = isLightweightTag(tag) ? tag.target : (tag as AnnotatedTag).target.target;
+            return {
+                sha: target.oid,
+                name: tag.name,
+                committedDate: target.committedDate,
+            }
+        });
+        return {
+            pageInfo: refs.pageInfo,
+            data: mappedTags,
+        }
     }
 
     async *mergeCommitIterator(branch: string, maxResults?: number) {
@@ -130,6 +222,39 @@ export class Github {
             pageInfo: history.pageInfo,
             data: mappedCommits,
         };
+    }
+}
+
+function isLightweightTag(tag: GraphQLTag): tag is LightweightTag {
+    return tag.target.hasOwnProperty("oid");
+}
+
+interface Tags {
+    pageInfo: {
+        hasNextPage: boolean;
+        endCursor: string | undefined;
+    };
+    data: Tag[];
+}
+
+interface GraphQLTag {
+    name: string;
+    target: object;
+}
+
+interface LightweightTag extends GraphQLTag {
+    target: {
+        oid: string;
+        committedDate: string;
+    }
+}
+
+interface AnnotatedTag extends GraphQLTag {
+    target: {
+        target: {
+            oid: string;
+            committedDate: string;
+        }
     }
 }
 
