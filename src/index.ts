@@ -1,6 +1,8 @@
 import * as yargs from "yargs";
+import { buildChangelog } from "./changelogBuilder";
 import { Github } from "./github";
 import { determineReleaseContext } from "./determineReleaseContext";
+import { PullRequestChangelogNoteBuilder } from "./pullRequestChangelogNoteBuilder";
 import { Repository } from "./repository";
 
 interface GitHubArgs {
@@ -36,6 +38,11 @@ const prepareCommand: yargs.CommandModule<{}, GitHubArgs> = {
         const releaseContext = await determineReleaseContext(github, "main");
 
         console.info(`Previous release is 'v${releaseContext.previousRelease}', ${releaseContext.unreleasedCommits.length} unreleased commit(s)`);
+
+        const changelog = buildChangelog(releaseContext.unreleasedCommits, new PullRequestChangelogNoteBuilder(), releaseContext.previousRelease)
+        console.info("Will open one pull request");
+        console.info("---");
+        console.info(changelog);
     },
     command: "prepare",
     describe: "Create or update a pull request representing the next release"
