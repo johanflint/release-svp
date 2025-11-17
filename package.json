@@ -15,7 +15,9 @@
   "devDependencies": {
     "@types/node": "^24.10.0",
     "@types/yargs": "^17.0.34",
-    "typescript": "^5.5.3"
+    "@vitest/coverage-v8": "^4.0.9",
+    "typescript": "^5.5.3",
+    "vitest": "^4.0.9"
   },
   "private": true
 }

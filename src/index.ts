@@ -4,6 +4,7 @@ import { Github } from "./github";
 import { determineReleaseContext } from "./determineReleaseContext";
 import { PullRequestChangelogNoteBuilder } from "./pullRequestChangelogNoteBuilder";
 import { Repository } from "./repository";
+import { SemanticVersioningStrategy } from "./versioningStrategies/semantic";
 
 interface GitHubArgs {
     token?: string;
@@ -39,7 +40,10 @@ const prepareCommand: yargs.CommandModule<{}, GitHubArgs> = {
 
         console.info(`Previous release is 'v${releaseContext.previousRelease}', ${releaseContext.unreleasedCommits.length} unreleased commit(s)`);
 
-        const changelog = buildChangelog(releaseContext.unreleasedCommits, new PullRequestChangelogNoteBuilder(), releaseContext.previousRelease)
+        const versioningStrategy = new SemanticVersioningStrategy();
+        const releaseVersion = versioningStrategy.releaseType(releaseContext.unreleasedCommits).bump(releaseContext.previousRelease);
+
+        const changelog = buildChangelog(releaseContext.unreleasedCommits, new PullRequestChangelogNoteBuilder(), releaseVersion)
         console.info("Will open one pull request");
         console.info("---");
         console.info(changelog);
