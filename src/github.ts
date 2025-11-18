@@ -1,4 +1,6 @@
+import { FileNotFoundError, GitHubFileContents, RepositoryFileCache } from "@google-automations/git-file-utils";
 import { Octokit } from "octokit";
+import { Octokit as RestOctokit } from "@octokit/rest";
 import { Commit, PullRequest } from "./commit";
 import { Repository } from "./repository";
 import { Tag } from "./tag";
@@ -6,6 +8,7 @@ import { Tag } from "./tag";
 export class Github {
     private readonly repository: Repository;
     private readonly octokit: Octokit;
+    private readonly fileCache: RepositoryFileCache;
 
     constructor(repository: Repository, token: string) {
         this.repository = repository;
@@ -13,6 +16,10 @@ export class Github {
         this.octokit = new Octokit({
             auth: process.env.GITHUB_TOKEN || token,
         });
+        const restOctokit = new RestOctokit({
+            auth: process.env.GITHUB_TOKEN || token,
+        });
+        this.fileCache = new RepositoryFileCache(restOctokit, this.repository);
     }
 
     async *tagIterator(maxResults?: number) {
@@ -222,6 +229,18 @@ export class Github {
             pageInfo: history.pageInfo,
             data: mappedCommits,
         };
+    }
+
+    async retrieveFileContents(path: string, branch: string): Promise<GitHubFileContents> {
+        console.debug(`Fetching file '${path}' from branch '${branch}'...`);
+        try {
+            return await this.fileCache.getFileContents(path, branch);
+        } catch (e) {
+            if (e instanceof FileNotFoundError) {
+                console.error(`Fetching file '${path}' from branch '${branch}'... failed, not found`);
+            }
+            throw e;
+        }
     }
 }
 

@@ -1,10 +1,13 @@
 import * as yargs from "yargs";
 import { buildChangelog } from "./changelogBuilder";
+import { updateContent } from "./changelogUpdater";
 import { Github } from "./github";
 import { determineReleaseContext } from "./determineReleaseContext";
 import { PullRequestChangelogNoteBuilder } from "./pullRequestChangelogNoteBuilder";
 import { Repository } from "./repository";
 import { SemanticVersioningStrategy } from "./versioningStrategies/semantic";
+
+const CHANGELOG_PATH = "CHANGELOG.md";
 
 interface GitHubArgs {
     token?: string;
@@ -47,6 +50,9 @@ const prepareCommand: yargs.CommandModule<{}, GitHubArgs> = {
         console.info("Will open one pull request");
         console.info("---");
         console.info(changelog);
+
+        const changelogFile = await github.retrieveFileContents(CHANGELOG_PATH, "main");
+        const _updatedContent = updateContent(changelogFile.parsedContent, changelog);
     },
     command: "prepare",
     describe: "Create or update a pull request representing the next release"
