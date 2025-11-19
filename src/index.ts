@@ -71,13 +71,34 @@ const prepareCommand: yargs.CommandModule<{}, GitHubArgs> = {
             labels: ["autorelease: pending"],
         }
 
+        const existingPullRequest = await findExistingPullRequest(pullRequest, github);
         const commitMessage = `Release v${releaseVersion}`;
-        const createdPullRequest = await github.createPullRequest(pullRequest, commitMessage, updates);
-        console.info(`Created pull request #${createdPullRequest.number}`);
+        if (existingPullRequest?.body === pullRequest.body && existingPullRequest.title === pullRequest.title) {
+            console.info(`Done, pull request https://github.com/${repository.owner}/${repository.repo}/pull/${existingPullRequest.number} remained the same`);
+            return;
+        }
+
+        if (existingPullRequest) {
+            const updatedPullRequest = await github.updatePullRequest(pullRequest, commitMessage, updates);
+            console.info(`Updated pull request https://github.com/${repository.owner}/${repository.repo}/pull/${updatedPullRequest.number}`);
+        } else {
+            const createdPullRequest = await github.createPullRequest(pullRequest, commitMessage, updates);
+            console.info(`Created pull request https://github.com/${repository.owner}/${repository.repo}/pull/${createdPullRequest.number}`);
+        }
     },
     command: "prepare",
     describe: "Create or update a pull request representing the next release"
 };
+
+async function findExistingPullRequest(pullRequest: PullRequest, github: Github): Promise<PullRequest | undefined> {
+    const openPullRequestsGenerator = github.pullRequestIterator(pullRequest.baseBranchName, "OPEN");
+    for await (const pullRequest of openPullRequestsGenerator) {
+        if (pullRequest.headBranchName === pullRequest.headBranchName && pullRequest.labels.includes("autorelease: pending")) {
+            return pullRequest;
+        }
+    }
+    return undefined;
+}
 
 function parseGitHubUrl(url: string): Repository {
     const match = /^([\w-.]+)\/([\w-.]+)$/.exec(url)

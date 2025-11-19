@@ -253,6 +253,29 @@ export class Github {
         return await this.retrievePullRequest(pullRequestNumber);
     }
 
+    async updatePullRequest(pullRequest: PullRequest, commitMessage: string, updates: Update[]): Promise<PullRequest> {
+        const pr = await this.createPullRequest(pullRequest, commitMessage, updates);
+        const response = await this.octokit.rest.pulls.update({
+            owner: this.repository.owner,
+            repo: this.repository.repo,
+            pull_number: pr.number,
+            title: pullRequest.title,
+            body: pullRequest.body,
+            state: "open",
+        });
+        return {
+            number: response.data.number,
+            title: response.data.title,
+            body: response.data.body || "",
+            permalink: response.data._links.html.href,
+            headBranchName: response.data.head.ref,
+            baseBranchName: response.data.base.ref,
+            labels: response.data.labels
+                .map(label => label.name)
+                .filter(name => !!name) as string[],
+        };
+    }
+
     private async buildChangeSet(updates: Update[], targetBranch: string): Promise<ChangeSet> {
         const changeSet = new Map();
         for (const update of updates) {
@@ -302,6 +325,94 @@ export class Github {
                 .map(label => label.name)
                 .filter(name => !!name) as string[],
         }
+    }
+
+    async *pullRequestIterator(targetBranch: string, status: "OPEN" | "CLOSED" | "MERGED" = "MERGED", maxResults?: number) {
+        let cursor: string | undefined = undefined;
+        let results = 0;
+        const maxAllowedResults = maxResults ?? Number.MAX_SAFE_INTEGER;
+        while (results < maxAllowedResults) {
+            const response = await this.pullRequestsGraphQL(targetBranch, status, cursor);
+
+            if (!response) {
+                break;
+            }
+
+            for (let x = 0; x < response.data.length; x++) {
+                results += 1;
+                yield response.data[x];
+            }
+
+            if (!response.pageInfo.hasNextPage) {
+                break;
+            }
+
+            cursor = response.pageInfo.endCursor;
+        }
+    }
+
+    private async pullRequestsGraphQL(targetBranch: string, status: "OPEN" | "CLOSED" | "MERGED" = "MERGED", cursor?: string): Promise<PullRequestHistory | null> {
+        console.debug(`Fetching pull requests on branch '${targetBranch}' with cursor '${cursor}'...`);
+        const query = `
+            query mergedPullRequests($owner: String!, $repo: String!, $count: Int!, $targetBranch: String!, $states: [PullRequestState!], $cursor: String) {
+                repository(owner: $owner, name: $repo) {
+                    pullRequests(first: $count, after: $cursor, baseRefName: $targetBranch, states: $states, orderBy: {field: CREATED_AT, direction: DESC}) {
+                        nodes {
+                            number
+                            title
+                            baseRefName
+                            headRefName
+                            labels(first: 10) {
+                                nodes {
+                                    name
+                                }
+                            }
+                            body
+                            mergeCommit {
+                                oid
+                            }
+                        }
+                        pageInfo {
+                            endCursor
+                            hasNextPage
+                        }
+                    }
+                }
+            }
+            `;
+        const parameters = {
+            cursor,
+            owner: this.repository.owner,
+            repo: this.repository.repo,
+            count: 10,
+            targetBranch,
+            states: [status]
+        };
+        const response: any = await this.octokit.graphql(query, parameters);
+
+        if (!response?.repository?.pullRequests) {
+            console.warn(`Could not find pull requests for branch ${targetBranch}`);
+            return null;
+        }
+
+        const pullRequests = (response.repository.pullRequests.nodes || []) as GraphQLPullRequest[];
+
+        return {
+            pageInfo: response.repository.pullRequests.pageInfo,
+            data: pullRequests.map(pullRequest => {
+                return {
+                    sha: pullRequest.mergeCommit?.oid, // already filtered non-merged
+                    number: pullRequest.number,
+                    title: pullRequest.title,
+                    body: pullRequest.body + '',
+                    permalink: pullRequest.permalink,
+                    headBranchName: pullRequest.headRefName,
+                    baseBranchName: pullRequest.baseRefName,
+                    mergeCommitOid: pullRequest.mergeCommit?.oid,
+                    labels: (pullRequest.labels?.nodes || []).map(l => l.name),
+                };
+            }),
+        };
     }
 
     async retrieveFileContents(path: string, branch: string): Promise<GitHubFileContents> {
@@ -397,3 +508,12 @@ interface FileDiff {
     readonly originalContent: string | null;
 }
 type ChangeSet = Map<string, FileDiff>;
+
+
+interface PullRequestHistory {
+    pageInfo: {
+        hasNextPage: boolean;
+        endCursor: string | undefined;
+    };
+    data: PullRequest[];
+}
