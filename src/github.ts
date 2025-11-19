@@ -1,13 +1,16 @@
-import { FileNotFoundError, GitHubFileContents, RepositoryFileCache } from "@google-automations/git-file-utils";
-import { Octokit } from "octokit";
+import { DEFAULT_FILE_MODE, FileNotFoundError, GitHubFileContents, RepositoryFileCache } from "@google-automations/git-file-utils";
 import { Octokit as RestOctokit } from "@octokit/rest";
+import { createPullRequest } from "code-suggester";
+import { Octokit } from "octokit";
 import { Commit, PullRequest } from "./commit";
 import { Repository } from "./repository";
 import { Tag } from "./tag";
+import { Update } from "./update";
 
 export class Github {
     private readonly repository: Repository;
     private readonly octokit: Octokit;
+    private readonly restOctokit: RestOctokit;
     private readonly fileCache: RepositoryFileCache;
 
     constructor(repository: Repository, token: string) {
@@ -16,10 +19,10 @@ export class Github {
         this.octokit = new Octokit({
             auth: process.env.GITHUB_TOKEN || token,
         });
-        const restOctokit = new RestOctokit({
+        this.restOctokit = new RestOctokit({
             auth: process.env.GITHUB_TOKEN || token,
         });
-        this.fileCache = new RepositoryFileCache(restOctokit, this.repository);
+        this.fileCache = new RepositoryFileCache(this.restOctokit, this.repository);
     }
 
     async *tagIterator(maxResults?: number) {
@@ -231,6 +234,76 @@ export class Github {
         };
     }
 
+    async createPullRequest(pullRequest: PullRequest, commitMessage: string, updates: Update[]): Promise<PullRequest> {
+        const changeSet = await this.buildChangeSet(updates, pullRequest.baseBranchName);
+        const pullRequestNumber = await createPullRequest(this.restOctokit, changeSet, {
+            upstreamOwner: this.repository.owner,
+            upstreamRepo: this.repository.repo,
+            title: pullRequest.title,
+            description: pullRequest.body,
+            branch: pullRequest.headBranchName,
+            primary: pullRequest.baseBranchName,
+            force: true,
+            fork: false,
+            message: commitMessage,
+            draft: false,
+            labels: pullRequest.labels,
+        });
+
+        return await this.retrievePullRequest(pullRequestNumber);
+    }
+
+    private async buildChangeSet(updates: Update[], targetBranch: string): Promise<ChangeSet> {
+        const changeSet = new Map();
+        for (const update of updates) {
+            let content: GitHubFileContents | undefined;
+            try {
+                content = await this.retrieveFileContents(update.path, targetBranch);
+            } catch (e) {
+                if (!(e instanceof FileNotFoundError)) {
+                    throw e;
+                }
+                if (!update.createIfMissing) {
+                    console.warn(`File '${update.path}' does not exist on branch '${targetBranch}'`);
+                    continue;
+                }
+            }
+
+            const contentText = content
+                ? Buffer.from(content.content, "base64").toString('utf8')
+                : undefined;
+            const updatedContent = update.updater.updateContent(contentText);
+            if (updatedContent) {
+                changeSet.set(update.path, {
+                    content: updatedContent,
+                    originalContent: content?.parsedContent || null,
+                    mode: content?.mode || DEFAULT_FILE_MODE,
+                })
+            }
+        }
+
+        return changeSet;
+    }
+
+    private async retrievePullRequest(pullRequestNumber: number): Promise<PullRequest> {
+        const response = await this.octokit.rest.pulls.get({
+            owner: this.repository.owner,
+            repo: this.repository.repo,
+            pull_number: pullRequestNumber,
+        });
+        return {
+            number: response.data.number,
+            title: response.data.title,
+            body: response.data.body || "",
+            permalink: response.data._links.html.href,
+            headBranchName: response.data.head.ref,
+            baseBranchName: response.data.base.ref,
+            labels: response.data.labels
+                .map(label => label.name)
+                .filter(name => !!name) as string[],
+        }
+    }
+
     async retrieveFileContents(path: string, branch: string): Promise<GitHubFileContents> {
         console.debug(`Fetching file '${path}' from branch '${branch}'...`);
         try {
@@ -317,3 +390,10 @@ interface CommitHistory {
     };
     data: Commit[];
 }
+
+interface FileDiff {
+    readonly mode: "100644" | "100755" | "040000" | "160000" | "120000";
+    readonly content: string | null;
+    readonly originalContent: string | null;
+}
+type ChangeSet = Map<string, FileDiff>;

@@ -1,10 +1,12 @@
 import * as yargs from "yargs";
 import { buildChangelog } from "./changelogBuilder";
-import { updateContent } from "./changelogUpdater";
+import { ChangelogUpdater } from "./changelogUpdater";
+import { PullRequest } from "./commit";
 import { Github } from "./github";
 import { determineReleaseContext } from "./determineReleaseContext";
 import { PullRequestChangelogNoteBuilder } from "./pullRequestChangelogNoteBuilder";
 import { Repository } from "./repository";
+import { Update } from "./update";
 import { SemanticVersioningStrategy } from "./versioningStrategies/semantic";
 
 const CHANGELOG_PATH = "CHANGELOG.md";
@@ -31,6 +33,7 @@ const prepareCommand: yargs.CommandModule<{}, GitHubArgs> = {
         return gitHubOptions(yargs);
     },
     async handler(args: yargs.ArgumentsCamelCase<GitHubArgs>) {
+        const targetBranch = "main";
         const repository = parseGitHubUrl(args.repoUrl ?? "");
         if (!repository.owner || !repository.repo) {
             console.error(`Invalid GitHub repository url '${args.repoUrl}, expected repository/owner format'`);
@@ -39,7 +42,7 @@ const prepareCommand: yargs.CommandModule<{}, GitHubArgs> = {
 
         console.info(`Prepare release for repository '${repository.owner}/${repository.repo}'`);
         const github = new Github(repository, args.token ?? "");
-        const releaseContext = await determineReleaseContext(github, "main");
+        const releaseContext = await determineReleaseContext(github, targetBranch);
 
         console.info(`Previous release is 'v${releaseContext.previousRelease}', ${releaseContext.unreleasedCommits.length} unreleased commit(s)`);
 
@@ -50,9 +53,27 @@ const prepareCommand: yargs.CommandModule<{}, GitHubArgs> = {
         console.info("Will open one pull request");
         console.info("---");
         console.info(changelog);
+        console.info("---");
 
-        const changelogFile = await github.retrieveFileContents(CHANGELOG_PATH, "main");
-        const _updatedContent = updateContent(changelogFile.parsedContent, changelog);
+        const updates: Update[] = [{
+            path: CHANGELOG_PATH,
+            createIfMissing: true,
+            updater: new ChangelogUpdater(changelog),
+        }];
+
+        const pullRequest: PullRequest = {
+            number: -1,
+            title: `Release v${releaseVersion}`,
+            body: "Description.",
+            permalink: "unused",
+            headBranchName: `release-svp--branches-${targetBranch}`,
+            baseBranchName: targetBranch,
+            labels: ["autorelease: pending"],
+        }
+
+        const commitMessage = `Release v${releaseVersion}`;
+        const createdPullRequest = await github.createPullRequest(pullRequest, commitMessage, updates);
+        console.info(`Created pull request #${createdPullRequest.number}`);
     },
     command: "prepare",
     describe: "Create or update a pull request representing the next release"

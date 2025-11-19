@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@google-automations/git-file-utils": "^3.0.0",
+    "code-suggester": "^5.0.0",
     "octokit": "^5.0.5",
     "yargs": "^17.0.0"
   },

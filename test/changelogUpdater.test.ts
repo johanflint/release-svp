@@ -1,24 +1,27 @@
 import { readFileSync } from "fs";
 import { resolve } from "path";
 import { expect, test, describe } from "vitest"
-import { updateContent } from "../src/changelogUpdater";
+import { ChangelogUpdater } from "../src/changelogUpdater";
 
 const fixturesPath = "./test/fixtures";
 
 describe("updateContent", () => {
+    const changelogEntry = `### 0.3.0 (2025-08-08)\n\n### Bug Fixes\n- New fix\n`;
+    const updater = new ChangelogUpdater(changelogEntry);
+
     test("inserts content at the right location if CHANGELOG exists", () => {
         const oldChangelog = readFileSync(resolve(fixturesPath, "./CHANGELOG.md"), "utf8").replace(/\r\n/g, "\n");
         const expectedChangelog = readFileSync(resolve(fixturesPath, "./CHANGELOG-updated.md"), "utf8").replace(/\r\n/g, "\n");
 
         const changelogEntry = `### 0.3.0 (2025-08-08)\n\n### Bug Fixes\n- New fix\n`;
-        const updatedChangelog = updateContent(oldChangelog, changelogEntry);
+        const updatedChangelog = updater.updateContent(oldChangelog);
 
         expect(updatedChangelog).toBe(expectedChangelog);
     });
 
     test("creates content if no CHANGELOG exists", () => {
         const changelogEntry = `### 0.3.0 (2025-08-08)\n\n### Bug Fixes\n- New fix\n`;
-        const updatedChangelog = updateContent("", changelogEntry);
+        const updatedChangelog = updater.updateContent("");
 
         const expectedChangelog = readFileSync(resolve(fixturesPath, "./CHANGELOG-new.md"), "utf8").replace(/\r\n/g, "\n");
         expect(updatedChangelog).toBe(expectedChangelog);
@@ -29,7 +32,7 @@ describe("updateContent", () => {
         const expectedChangelog = readFileSync(resolve(fixturesPath, "./CHANGELOG-non-conforming-updated.md"), "utf8").replace(/\r\n/g, "\n");
 
         const changelogEntry = `### 0.3.0 (2025-08-08)\n\n### Bug Fixes\n- New fix\n`;
-        const updatedChangelog = updateContent(oldChangelog, changelogEntry);
+        const updatedChangelog = updater.updateContent(oldChangelog);
 
         expect(updatedChangelog).toBe(expectedChangelog);
     });
