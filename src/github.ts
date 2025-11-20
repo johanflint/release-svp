@@ -3,6 +3,7 @@ import { Octokit as RestOctokit } from "@octokit/rest";
 import { createPullRequest } from "code-suggester";
 import { Octokit } from "octokit";
 import { Commit, PullRequest } from "./commit";
+import { loadSchema } from "./loadSchema";
 import { Logger } from "./logger";
 import { Repository } from "./repository";
 import { Tag } from "./tag";
@@ -57,40 +58,7 @@ export class Github {
 
     private async tagsGraphQL(cursor?: string): Promise<Tags | null> {
         this.logger.debug(`Fetching tags with cursor '${cursor}...`);
-        const query = `
-            query latestTags($owner: String!, $repo: String!, $count: Int!, $cursor: String) {
-                repository(owner:$owner, name: $repo) {
-                    refs(refPrefix: "refs/tags/", first: $count, after: $cursor, orderBy: { field: TAG_COMMIT_DATE, direction: DESC}) {
-                        nodes {
-                            name
-                            target {
-                                ... on Commit {
-                                    oid
-                                    committedDate
-                                    messageHeadline
-                                }
-                                ... on Tag {
-                                    tagger {
-                                        name
-                                        date
-                                    }
-                                    target {
-                                        oid
-                                        ... on Commit {
-                                            committedDate
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        pageInfo {
-                            hasNextPage
-                            endCursor
-                        }
-                    }
-                }
-            }
-        `;
+        const query = loadSchema("latestTags.graphql");
 
         const parameters = {
             cursor,
@@ -149,45 +117,7 @@ export class Github {
 
     private async mergeCommitsGraphQL(targetBranch: string, cursor?: string): Promise<CommitHistory | null> {
         this.logger.debug(`Fetching merge commits on branch '${targetBranch} with cursor '${cursor}'...`);
-        const query = `
-            query pullRequestsSince($owner: String!, $repo: String!, $count: Int!, $targetBranch: String!, $cursor: String) {
-                repository(owner: $owner, name: $repo) {
-                    ref(qualifiedName: $targetBranch) {
-                        target {
-                        ... on Commit {
-                                history(first: $count, after: $cursor) {
-                                    nodes {
-                                        sha: oid
-                                        message
-                                        associatedPullRequests(first: 10) {
-                                            nodes {
-                                                number
-                                                title
-                                                body
-                                                permalink
-                                                headRefName
-                                                baseRefName
-                                                mergeCommit {
-                                                    oid
-                                                }
-                                                labels(first: 10) {
-                                                    nodes {
-                                                        name
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                    pageInfo {
-                                        hasNextPage
-                                        endCursor
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }`;
+        const query = loadSchema("pullRequestsSince.graphql");
 
         const parameters = {
             cursor,
@@ -359,33 +289,7 @@ export class Github {
 
     private async pullRequestsGraphQL(targetBranch: string, status: "OPEN" | "CLOSED" | "MERGED" = "MERGED", cursor?: string): Promise<PullRequestHistory | null> {
         this.logger.debug(`Fetching pull requests on branch '${targetBranch}' with cursor '${cursor}'...`);
-        const query = `
-            query mergedPullRequests($owner: String!, $repo: String!, $count: Int!, $targetBranch: String!, $states: [PullRequestState!], $cursor: String) {
-                repository(owner: $owner, name: $repo) {
-                    pullRequests(first: $count, after: $cursor, baseRefName: $targetBranch, states: $states, orderBy: {field: CREATED_AT, direction: DESC}) {
-                        nodes {
-                            number
-                            title
-                            baseRefName
-                            headRefName
-                            labels(first: 10) {
-                                nodes {
-                                    name
-                                }
-                            }
-                            body
-                            mergeCommit {
-                                oid
-                            }
-                        }
-                        pageInfo {
-                            endCursor
-                            hasNextPage
-                        }
-                    }
-                }
-            }
-            `;
+        const query = loadSchema("mergedPullRequests.graphql");
         const parameters = {
             cursor,
             owner: this.repository.owner,

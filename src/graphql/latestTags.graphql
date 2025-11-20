@@ -1,0 +1,32 @@
+query latestTags($owner: String!, $repo: String!, $count: Int!, $cursor: String) {
+    repository(owner:$owner, name: $repo) {
+        refs(refPrefix: "refs/tags/", first: $count, after: $cursor, orderBy: { field: TAG_COMMIT_DATE, direction: DESC}) {
+            nodes {
+                name
+                target {
+                    ... on Commit {
+                        oid
+                        committedDate
+                        messageHeadline
+                    }
+                    ... on Tag {
+                        tagger {
+                            name
+                            date
+                        }
+                        target {
+                            oid
+                            ... on Commit {
+                                committedDate
+                            }
+                        }
+                    }
+                }
+            }
+            pageInfo {
+                hasNextPage
+                endCursor
+            }
+        }
+    }
+}
