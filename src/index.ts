@@ -10,6 +10,7 @@ import { Update } from "./update";
 import { SemanticVersioningStrategy } from "./versioningStrategies/semantic";
 
 const CHANGELOG_PATH = "CHANGELOG.md";
+const LABEL_PENDING = "autorelease: pending";
 
 interface GitHubArgs {
     token?: string;
@@ -68,7 +69,7 @@ const prepareCommand: yargs.CommandModule<{}, GitHubArgs> = {
             permalink: "unused",
             headBranchName: `release-svp--branches-${targetBranch}`,
             baseBranchName: targetBranch,
-            labels: ["autorelease: pending"],
+            labels: [LABEL_PENDING],
         }
 
         const existingPullRequest = await findExistingPullRequest(pullRequest, github);
@@ -93,7 +94,7 @@ const prepareCommand: yargs.CommandModule<{}, GitHubArgs> = {
 async function findExistingPullRequest(pullRequest: PullRequest, github: Github): Promise<PullRequest | undefined> {
     const openPullRequestsGenerator = github.pullRequestIterator(pullRequest.baseBranchName, "OPEN");
     for await (const pullRequest of openPullRequestsGenerator) {
-        if (pullRequest.headBranchName === pullRequest.headBranchName && pullRequest.labels.includes("autorelease: pending")) {
+        if (pullRequest.headBranchName === pullRequest.headBranchName && pullRequest.labels.includes(LABEL_PENDING)) {
             return pullRequest;
         }
     }
