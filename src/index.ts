@@ -5,6 +5,7 @@ import { PullRequest } from "./commit";
 import { Github } from "./github";
 import { determineReleaseContext } from "./determineReleaseContext";
 import { logger } from "./logger";
+import { createPullRequestBody } from "./pullRequestBody";
 import { PullRequestChangelogNoteBuilder } from "./pullRequestChangelogNoteBuilder";
 import { Repository } from "./repository";
 import { Update } from "./update";
@@ -67,7 +68,7 @@ const prepareCommand: yargs.CommandModule<{}, GitHubArgs> = {
         const pullRequest: PullRequest = {
             number: -1,
             title: `Release v${releaseVersion}`,
-            body: "Description.",
+            body: createPullRequestBody(changelog),
             permalink: "unused",
             headBranchName: `release-svp--branches-${targetBranch}`,
             baseBranchName: targetBranch,
