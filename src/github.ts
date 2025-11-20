@@ -3,6 +3,7 @@ import { Octokit as RestOctokit } from "@octokit/rest";
 import { createPullRequest } from "code-suggester";
 import { Octokit } from "octokit";
 import { Commit, PullRequest } from "./commit";
+import { Logger } from "./logger";
 import { Repository } from "./repository";
 import { Tag } from "./tag";
 import { Update } from "./update";
@@ -13,7 +14,7 @@ export class Github {
     private readonly restOctokit: RestOctokit;
     private readonly fileCache: RepositoryFileCache;
 
-    constructor(repository: Repository, token: string) {
+    constructor(repository: Repository, token: string, private readonly logger: Logger) {
         this.repository = repository;
 
         this.octokit = new Octokit({
@@ -55,7 +56,7 @@ export class Github {
     }
 
     private async tagsGraphQL(cursor?: string): Promise<Tags | null> {
-        console.debug(`Fetching tags with cursor '${cursor}...`);
+        this.logger.debug(`Fetching tags with cursor '${cursor}...`);
         const query = `
             query latestTags($owner: String!, $repo: String!, $count: Int!, $cursor: String) {
                 repository(owner:$owner, name: $repo) {
@@ -100,7 +101,7 @@ export class Github {
         const response: any = await this.octokit.graphql(query, parameters);
 
         if (!response) {
-            console.warn(`No response received for query: ${query}`, parameters)
+            this.logger.warn(`No response received for query: ${query}`, parameters)
             return null;
         }
 
@@ -147,7 +148,7 @@ export class Github {
     }
 
     private async mergeCommitsGraphQL(targetBranch: string, cursor?: string): Promise<CommitHistory | null> {
-        console.debug(`Fetching merge commits on branch '${targetBranch} with cursor '${cursor}'...`);
+        this.logger.debug(`Fetching merge commits on branch '${targetBranch} with cursor '${cursor}'...`);
         const query = `
             query pullRequestsSince($owner: String!, $repo: String!, $count: Int!, $targetBranch: String!, $cursor: String) {
                 repository(owner: $owner, name: $repo) {
@@ -198,12 +199,12 @@ export class Github {
         const response: any = await this.octokit.graphql(query, parameters);
 
         if (!response) {
-            console.warn(`No response received for query: ${query}`, parameters)
+            this.logger.warn(`No response received for query: ${query}`, parameters)
             return null;
         }
 
         if (!response.repository?.ref) {
-            console.warn(`No commits found for branch '${targetBranch}'`);
+            this.logger.warn(`No commits found for branch '${targetBranch}'`);
             return null;
         }
 
@@ -292,7 +293,7 @@ export class Github {
                     throw e;
                 }
                 if (!update.createIfMissing) {
-                    console.warn(`File '${update.path}' does not exist on branch '${targetBranch}'`);
+                    this.logger.warn(`File '${update.path}' does not exist on branch '${targetBranch}'`);
                     continue;
                 }
             }
@@ -357,7 +358,7 @@ export class Github {
     }
 
     private async pullRequestsGraphQL(targetBranch: string, status: "OPEN" | "CLOSED" | "MERGED" = "MERGED", cursor?: string): Promise<PullRequestHistory | null> {
-        console.debug(`Fetching pull requests on branch '${targetBranch}' with cursor '${cursor}'...`);
+        this.logger.debug(`Fetching pull requests on branch '${targetBranch}' with cursor '${cursor}'...`);
         const query = `
             query mergedPullRequests($owner: String!, $repo: String!, $count: Int!, $targetBranch: String!, $states: [PullRequestState!], $cursor: String) {
                 repository(owner: $owner, name: $repo) {
@@ -396,7 +397,7 @@ export class Github {
         const response: any = await this.octokit.graphql(query, parameters);
 
         if (!response?.repository?.pullRequests) {
-            console.warn(`Could not find pull requests for branch ${targetBranch}`);
+            this.logger.warn(`Could not find pull requests for branch ${targetBranch}`);
             return null;
         }
 
@@ -421,12 +422,12 @@ export class Github {
     }
 
     async retrieveFileContents(path: string, branch: string): Promise<GitHubFileContents> {
-        console.debug(`Fetching file '${path}' from branch '${branch}'...`);
+        this.logger.debug(`Fetching file '${path}' from branch '${branch}'...`);
         try {
             return await this.fileCache.getFileContents(path, branch);
         } catch (e) {
             if (e instanceof FileNotFoundError) {
-                console.error(`Fetching file '${path}' from branch '${branch}'... failed, not found`);
+                this.logger.error(`Fetching file '${path}' from branch '${branch}'... failed, not found`);
             }
             throw e;
         }

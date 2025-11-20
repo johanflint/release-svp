@@ -1,5 +1,6 @@
 import { Commit } from "./commit";
 import { Github } from "./github";
+import { logger } from "./logger";
 import { Tag } from "./tag";
 import { Version } from "./version";
 
@@ -35,7 +36,7 @@ export async function determineReleaseContext(github: Github, targetBranch: stri
             index++;
         }
 
-        console.warn(`Tag '${tag.name}' not found in recent commits on branch '${targetBranch}', skipping`);
+        logger.warn(`Tag '${tag.name}' not found in recent commits on branch '${targetBranch}', skipping`);
     }
 
     // No tag found that is reachable from the target branch, this is the first release

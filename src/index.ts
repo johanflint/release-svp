@@ -4,6 +4,7 @@ import { ChangelogUpdater } from "./changelogUpdater";
 import { PullRequest } from "./commit";
 import { Github } from "./github";
 import { determineReleaseContext } from "./determineReleaseContext";
+import { logger } from "./logger";
 import { PullRequestChangelogNoteBuilder } from "./pullRequestChangelogNoteBuilder";
 import { Repository } from "./repository";
 import { Update } from "./update";
@@ -36,25 +37,26 @@ const prepareCommand: yargs.CommandModule<{}, GitHubArgs> = {
     async handler(args: yargs.ArgumentsCamelCase<GitHubArgs>) {
         const repository = parseGitHubUrl(args.repoUrl ?? "");
         if (!repository.owner || !repository.repo) {
-            console.error(`Invalid GitHub repository url '${args.repoUrl}, expected repository/owner format'`);
+            logger.error(`Invalid GitHub repository url '${args.repoUrl}', expected 'repository/owner' format`);
             return;
         }
 
-        console.info(`Prepare release for repository '${repository.owner}/${repository.repo}'`);
-        const github = new Github(repository, args.token ?? "");
+        logger.info(`Prepare release for repository '${repository.owner}/${repository.repo}'`);
+        const github = new Github(repository, args.token ?? "", logger);
         const targetBranch = await github.retrieveDefaultBranch();
         const releaseContext = await determineReleaseContext(github, targetBranch);
 
-        console.info(`Previous release is 'v${releaseContext.previousRelease}', ${releaseContext.unreleasedCommits.length} unreleased commit(s)`);
+        logger.info(`Previous release is 'v${releaseContext.previousRelease}', ${releaseContext.unreleasedCommits.length} unreleased commit(s)`);
 
         const versioningStrategy = new SemanticVersioningStrategy();
         const releaseVersion = versioningStrategy.releaseType(releaseContext.unreleasedCommits).bump(releaseContext.previousRelease);
+        logger.info(`Next release is v${releaseVersion}`);
 
         const changelog = buildChangelog(releaseContext.unreleasedCommits, new PullRequestChangelogNoteBuilder(), releaseVersion)
-        console.info("Will open one pull request");
-        console.info("---");
-        console.info(changelog);
-        console.info("---");
+        logger.debug(`Will open one pull request`);
+        logger.info("---");
+        logger.info(changelog);
+        logger.info("---");
 
         const updates: Update[] = [{
             path: CHANGELOG_PATH,
@@ -75,16 +77,16 @@ const prepareCommand: yargs.CommandModule<{}, GitHubArgs> = {
         const existingPullRequest = await findExistingPullRequest(pullRequest, github);
         const commitMessage = `Release v${releaseVersion}`;
         if (existingPullRequest?.body === pullRequest.body && existingPullRequest.title === pullRequest.title) {
-            console.info(`Done, pull request https://github.com/${repository.owner}/${repository.repo}/pull/${existingPullRequest.number} remained the same`);
+            logger.info(`Done, pull request https://github.com/${repository.owner}/${repository.repo}/pull/${existingPullRequest.number} remained the same`);
             return;
         }
 
         if (existingPullRequest) {
             const updatedPullRequest = await github.updatePullRequest(pullRequest, commitMessage, updates);
-            console.info(`Updated pull request https://github.com/${repository.owner}/${repository.repo}/pull/${updatedPullRequest.number}`);
+            logger.info(`Updated pull request https://github.com/${repository.owner}/${repository.repo}/pull/${updatedPullRequest.number}`);
         } else {
             const createdPullRequest = await github.createPullRequest(pullRequest, commitMessage, updates);
-            console.info(`Created pull request https://github.com/${repository.owner}/${repository.repo}/pull/${createdPullRequest.number}`);
+            logger.info(`Created pull request https://github.com/${repository.owner}/${repository.repo}/pull/${createdPullRequest.number}`);
         }
     },
     command: "prepare",
