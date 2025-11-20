@@ -33,7 +33,6 @@ const prepareCommand: yargs.CommandModule<{}, GitHubArgs> = {
         return gitHubOptions(yargs);
     },
     async handler(args: yargs.ArgumentsCamelCase<GitHubArgs>) {
-        const targetBranch = "main";
         const repository = parseGitHubUrl(args.repoUrl ?? "");
         if (!repository.owner || !repository.repo) {
             console.error(`Invalid GitHub repository url '${args.repoUrl}, expected repository/owner format'`);
@@ -42,6 +41,7 @@ const prepareCommand: yargs.CommandModule<{}, GitHubArgs> = {
 
         console.info(`Prepare release for repository '${repository.owner}/${repository.repo}'`);
         const github = new Github(repository, args.token ?? "");
+        const targetBranch = await github.retrieveDefaultBranch();
         const releaseContext = await determineReleaseContext(github, targetBranch);
 
         console.info(`Previous release is 'v${releaseContext.previousRelease}', ${releaseContext.unreleasedCommits.length} unreleased commit(s)`);

@@ -25,6 +25,11 @@ export class Github {
         this.fileCache = new RepositoryFileCache(this.restOctokit, this.repository);
     }
 
+    async retrieveDefaultBranch(): Promise<string> {
+        const response = await this.octokit.rest.repos.get({ owner: this.repository.owner, repo: this.repository.repo });
+        return response.data.default_branch;
+    }
+
     async *tagIterator(maxResults?: number) {
         let cursor: string | undefined = undefined;
         let results = 0;
