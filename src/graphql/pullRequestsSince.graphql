@@ -1,0 +1,38 @@
+query pullRequestsSince($owner: String!, $repo: String!, $count: Int!, $targetBranch: String!, $cursor: String) {
+    repository(owner: $owner, name: $repo) {
+        ref(qualifiedName: $targetBranch) {
+            target {
+            ... on Commit {
+                    history(first: $count, after: $cursor) {
+                        nodes {
+                            sha: oid
+                            message
+                            associatedPullRequests(first: 10) {
+                                nodes {
+                                    number
+                                    title
+                                    body
+                                    permalink
+                                    headRefName
+                                    baseRefName
+                                    mergeCommit {
+                                        oid
+                                    }
+                                    labels(first: 10) {
+                                        nodes {
+                                            name
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        pageInfo {
+                            hasNextPage
+                            endCursor
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

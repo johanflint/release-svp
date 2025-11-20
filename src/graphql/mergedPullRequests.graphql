@@ -1,0 +1,25 @@
+query mergedPullRequests($owner: String!, $repo: String!, $count: Int!, $targetBranch: String!, $states: [PullRequestState!], $cursor: String) {
+    repository(owner: $owner, name: $repo) {
+        pullRequests(first: $count, after: $cursor, baseRefName: $targetBranch, states: $states, orderBy: {field: CREATED_AT, direction: DESC}) {
+            nodes {
+                number
+                title
+                baseRefName
+                headRefName
+                labels(first: 10) {
+                    nodes {
+                        name
+                    }
+                }
+                body
+                mergeCommit {
+                    oid
+                }
+            }
+            pageInfo {
+                endCursor
+                hasNextPage
+            }
+        }
+    }
+}
