@@ -5,6 +5,7 @@
   "main": "dist/index.js",
   "scripts": {
     "start": "node dist/src/index.js",
+    "test": "vitest run",
     "copy-graphql": "cp -R src/graphql dist",
     "build": "tsc -p . && npm run copy-graphql",
     "watch": "npm-run-all -p watch:tsc watch:graphql",
