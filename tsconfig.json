@@ -16,8 +16,11 @@
     "sourceMap": true,
     "strict": true,
     "target": "es2024",
+    "typeRoots": [
+      "./types", "./node_modules/@types"
+    ]
   },
-  "include": ["src"],
+  "include": ["src", "types"],
   "exclude": [
     "node_modules"
   ]

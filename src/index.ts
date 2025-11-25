@@ -1,9 +1,11 @@
-import * as yargs from "yargs";
+import yargs, { ArgumentsCamelCase, Argv, CommandModule } from "yargs";
+import { hideBin } from "yargs/helpers";
 import { buildChangelog } from "./changelogBuilder";
+import "source-map-support/register";
 import { ChangelogUpdater } from "./changelogUpdater";
 import { PullRequest } from "./commit";
-import { Github } from "./github";
 import { determineReleaseContext } from "./determineReleaseContext";
+import { Github } from "./github";
 import { logger } from "./logger";
 import { createPullRequestBody } from "./pullRequestBody";
 import { PullRequestChangelogNoteBuilder } from "./pullRequestChangelogNoteBuilder";
@@ -19,7 +21,7 @@ interface GitHubArgs {
     repoUrl?: string;
 }
 
-function gitHubOptions(yargs: yargs.Argv<GitHubArgs>): yargs.Argv {
+function gitHubOptions(yargs: Argv<GitHubArgs>): yargs.Argv {
     return yargs
         .option("token", {
             describe: "GitHub token with repository write permissions",
@@ -31,11 +33,11 @@ function gitHubOptions(yargs: yargs.Argv<GitHubArgs>): yargs.Argv {
         })
 }
 
-const prepareCommand: yargs.CommandModule<{}, GitHubArgs> = {
+const prepareCommand: CommandModule<{}, GitHubArgs> = {
     builder(yargs) {
         return gitHubOptions(yargs);
     },
-    async handler(args: yargs.ArgumentsCamelCase<GitHubArgs>) {
+    async handler(args: ArgumentsCamelCase<GitHubArgs>) {
         const repository = parseGitHubUrl(args.repoUrl ?? "");
         if (!repository.owner || !repository.repo) {
             logger.error(`Invalid GitHub repository url '${args.repoUrl}', expected 'repository/owner' format`);
@@ -112,7 +114,7 @@ function parseGitHubUrl(url: string): Repository {
     }
 }
 
-const parser = yargs.command(prepareCommand)
+const parser = yargs(hideBin(process.argv)).command(prepareCommand)
     .demandCommand(1)
     .strict(true)
     .scriptName("release-svp");

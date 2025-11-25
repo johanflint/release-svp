@@ -3,7 +3,9 @@ import { Octokit as RestOctokit } from "@octokit/rest";
 import { createPullRequest } from "code-suggester";
 import { Octokit } from "octokit";
 import { Commit, PullRequest } from "./commit";
-import { loadSchema } from "./loadSchema";
+import latestTagsQuery from "./graphql/latestTags.graphql";
+import mergedPullRequestsQuery from "./graphql/mergedPullRequests.graphql";
+import pullRequestsSinceQuery from "./graphql/pullRequestsSince.graphql";
 import { Logger } from "./logger";
 import { Repository } from "./repository";
 import { Tag } from "./tag";
@@ -58,18 +60,16 @@ export class Github {
 
     private async tagsGraphQL(cursor?: string): Promise<Tags | null> {
         this.logger.debug(`Fetching tags with cursor '${cursor}...`);
-        const query = loadSchema("latestTags.graphql");
-
         const parameters = {
             cursor,
             owner: this.repository.owner,
             repo: this.repository.repo,
             count: 10,
         };
-        const response: any = await this.octokit.graphql(query, parameters);
+        const response: any = await this.octokit.graphql(latestTagsQuery, parameters);
 
         if (!response) {
-            this.logger.warn(`No response received for query: ${query}`, parameters)
+            this.logger.warn(`No response received for query: ${latestTagsQuery}`, parameters)
             return null;
         }
 
@@ -117,8 +117,6 @@ export class Github {
 
     private async mergeCommitsGraphQL(targetBranch: string, cursor?: string): Promise<CommitHistory | null> {
         this.logger.debug(`Fetching merge commits on branch '${targetBranch} with cursor '${cursor}'...`);
-        const query = loadSchema("pullRequestsSince.graphql");
-
         const parameters = {
             cursor,
             owner: this.repository.owner,
@@ -126,10 +124,10 @@ export class Github {
             count: 10,
             targetBranch,
         };
-        const response: any = await this.octokit.graphql(query, parameters);
+        const response: any = await this.octokit.graphql(pullRequestsSinceQuery, parameters);
 
         if (!response) {
-            this.logger.warn(`No response received for query: ${query}`, parameters)
+            this.logger.warn(`No response received for query: ${pullRequestsSinceQuery}`, parameters)
             return null;
         }
 
@@ -289,7 +287,6 @@ export class Github {
 
     private async pullRequestsGraphQL(targetBranch: string, status: "OPEN" | "CLOSED" | "MERGED" = "MERGED", cursor?: string): Promise<PullRequestHistory | null> {
         this.logger.debug(`Fetching pull requests on branch '${targetBranch}' with cursor '${cursor}'...`);
-        const query = loadSchema("mergedPullRequests.graphql");
         const parameters = {
             cursor,
             owner: this.repository.owner,
@@ -298,7 +295,7 @@ export class Github {
             targetBranch,
             states: [status]
         };
-        const response: any = await this.octokit.graphql(query, parameters);
+        const response: any = await this.octokit.graphql(mergedPullRequestsQuery, parameters);
 
         if (!response?.repository?.pullRequests) {
             this.logger.warn(`Could not find pull requests for branch ${targetBranch}`);
