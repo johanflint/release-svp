@@ -1,8 +1,8 @@
 import yargs, { ArgumentsCamelCase, Argv, CommandModule } from "yargs";
+import "source-map-support/register";
+import init from "@rainbowatcher/toml-edit-js";
 import { hideBin } from "yargs/helpers";
 import { buildChangelog } from "./changelogBuilder";
-import "source-map-support/register";
-import { ChangelogUpdater } from "./changelogUpdater";
 import { PullRequest } from "./commit";
 import { determineReleaseContext } from "./determineReleaseContext";
 import { Github } from "./github";
@@ -10,10 +10,10 @@ import { logger } from "./logger";
 import { createPullRequestBody } from "./pullRequestBody";
 import { PullRequestChangelogNoteBuilder } from "./pullRequestChangelogNoteBuilder";
 import { Repository } from "./repository";
-import { Update } from "./update";
+import { UpdateOptions } from "./strategy";
+import { buildStrategy, strategyTypes } from "./strategyFactory";
 import { SemanticVersioningStrategy } from "./versioningStrategies/semantic";
 
-const CHANGELOG_PATH = "CHANGELOG.md";
 const LABEL_PENDING = "autorelease: pending";
 
 interface GitHubArgs {
@@ -31,6 +31,10 @@ function gitHubOptions(yargs: Argv<GitHubArgs>): yargs.Argv {
             demandOption: true,
             type: "string",
         })
+        .option("release-type", {
+            describe: "Type of repository a release is being created for",
+            choices: strategyTypes(),
+        });
 }
 
 const prepareCommand: CommandModule<{}, GitHubArgs> = {
@@ -43,6 +47,9 @@ const prepareCommand: CommandModule<{}, GitHubArgs> = {
             logger.error(`Invalid GitHub repository url '${args.repoUrl}', expected 'repository/owner' format`);
             return;
         }
+
+        // Initialize wasm for the TOML library
+        await init();
 
         logger.info(`Prepare release for repository '${repository.owner}/${repository.repo}'`);
         const github = new Github(repository, args.token ?? "", logger);
@@ -61,11 +68,13 @@ const prepareCommand: CommandModule<{}, GitHubArgs> = {
         logger.info(changelog);
         logger.info("---");
 
-        const updates: Update[] = [{
-            path: CHANGELOG_PATH,
-            createIfMissing: true,
-            updater: new ChangelogUpdater(changelog),
-        }];
+        const strategy = buildStrategy(args.releaseType as string, { github });
+        const updateOptions: UpdateOptions = {
+            changelogEntry: changelog,
+            releaseVersion,
+            targetBranch,
+        };
+        const updates = await strategy.determineUpdates(updateOptions);
 
         const pullRequest: PullRequest = {
             number: -1,
