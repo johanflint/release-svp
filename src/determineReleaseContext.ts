@@ -1,10 +1,8 @@
 import { Commit } from "./commit";
 import { Github } from "./github";
 import { logger } from "./logger";
-import { Tag } from "./tag";
+import { parseVersionTag } from "./parseVersionTag";
 import { Version } from "./version";
-
-const TAG_PATTERN = /^(?<v>v)?(?<version>\d+\.\d+\.\d+.*)$/;
 
 export async function determineReleaseContext(github: Github, targetBranch: string): Promise<ReleaseContext> {
     const commitShas = new Set<string>();
@@ -12,7 +10,7 @@ export async function determineReleaseContext(github: Github, targetBranch: stri
 
     const tagGenerator = github.tagIterator();
     for await (const tag of tagGenerator) {
-        const version = matchTag(tag.name);
+        const version = parseVersionTag(tag.name);
         if (!version) {
             continue;
         }
@@ -57,11 +55,3 @@ function toIterable<T>(data: T[]): AsyncGenerator<T, void, unknown> {
     })();
 }
 
-function matchTag(tagName: string): Version | undefined {
-    const match = tagName.match(TAG_PATTERN);
-    if (match?.groups) {
-        return Version.parse(match.groups["version"]);
-    }
-
-    return;
-}
