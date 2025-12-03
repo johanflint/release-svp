@@ -1,10 +1,11 @@
+import init from "@rainbowatcher/toml-edit-js";
 import yargs, { ArgumentsCamelCase, Argv, CommandModule } from "yargs";
 import "source-map-support/register";
-import init from "@rainbowatcher/toml-edit-js";
 import { hideBin } from "yargs/helpers";
 import { buildChangelog } from "./changelogBuilder";
 import { PullRequest } from "./commit";
 import { determineReleaseContext } from "./determineReleaseContext";
+import { determineReleases } from "./determineReleases";
 import { Github } from "./github";
 import { logger } from "./logger";
 import { createPullRequestBody } from "./pullRequestBody";
@@ -15,6 +16,7 @@ import { buildStrategy, strategyTypes } from "./strategyFactory";
 import { SemanticVersioningStrategy } from "./versioningStrategies/semantic";
 
 const LABEL_PENDING = "autorelease: pending";
+const RELEASE_BRANCH_PREFIX = "release-svp--branches-";
 
 interface GitHubArgs {
     token?: string;
@@ -81,7 +83,7 @@ const prepareCommand: CommandModule<{}, GitHubArgs> = {
             title: `Release v${releaseVersion}`,
             body: createPullRequestBody(changelog),
             permalink: "unused",
-            headBranchName: `release-svp--branches-${targetBranch}`,
+            headBranchName: `${RELEASE_BRANCH_PREFIX}${targetBranch}`,
             baseBranchName: targetBranch,
             labels: [LABEL_PENDING],
         }
@@ -115,6 +117,30 @@ async function findExistingPullRequest(pullRequest: PullRequest, github: Github)
     return undefined;
 }
 
+const releaseCommand: CommandModule<{}, GitHubArgs> = {
+    builder(yargs) {
+        return gitHubOptions(yargs);
+    },
+    async handler(args: ArgumentsCamelCase<GitHubArgs>) {
+        const repository = parseGitHubUrl(args.repoUrl ?? "");
+        if (!repository.owner || !repository.repo) {
+            logger.error(`Invalid GitHub repository url '${args.repoUrl}', expected 'repository/owner' format`);
+            return;
+        }
+
+        const github = new Github(repository, args.token ?? "", logger);
+        const targetBranch = await github.retrieveDefaultBranch();
+
+        const releases = await determineReleases(github, targetBranch, { releaseBranchPrefix: RELEASE_BRANCH_PREFIX, labelPending: LABEL_PENDING });
+
+        for (const release of releases) {
+            logger.info(`Creating release ${release.tag} for pull request #${release.pullRequestNumber}...`);
+        }
+    },
+    command: "release",
+    describe: "Create a GitHub release from a release pull request"
+}
+
 function parseGitHubUrl(url: string): Repository {
     const match = /^([\w-.]+)\/([\w-.]+)$/.exec(url)
     return {
@@ -123,7 +149,9 @@ function parseGitHubUrl(url: string): Repository {
     }
 }
 
-const parser = yargs(hideBin(process.argv)).command(prepareCommand)
+const parser = yargs(hideBin(process.argv))
+    .command(prepareCommand)
+    .command(releaseCommand)
     .demandCommand(1)
     .strict(true)
     .scriptName("release-svp");
