@@ -6,7 +6,7 @@ import { buildChangelog } from "./changelogBuilder";
 import { PullRequest } from "./commit";
 import { determineReleaseContext } from "./determineReleaseContext";
 import { determineReleases } from "./determineReleases";
-import { Github } from "./github";
+import { DuplicateReleaseError, Github } from "./github";
 import { logger } from "./logger";
 import { createPullRequestBody } from "./pullRequestBody";
 import { PullRequestChangelogNoteBuilder } from "./pullRequestChangelogNoteBuilder";
@@ -135,6 +135,18 @@ const releaseCommand: CommandModule<{}, GitHubArgs> = {
 
         for (const release of releases) {
             logger.info(`Creating release ${release.tag} for pull request #${release.pullRequestNumber}...`);
+            try {
+                const result = await github.createRelease(release);
+                logger.info(`Created release ${result.id} at ${result.url}`);
+
+                const comment = `:bowtie: Created release [${release.tag}](${result.url}) :tulip:`;
+                const url = await github.commentOnIssue(comment, release.pullRequestNumber);
+                logger.info(`Commented on pull request #${release.pullRequestNumber} at ${url}`);
+            } catch (e) {
+                if (e instanceof DuplicateReleaseError) {
+                    logger.warn(`Duplicate release tag for ${e.tagName}`);
+                }
+            }
         }
     },
     command: "release",
