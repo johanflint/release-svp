@@ -37,6 +37,13 @@ export async function determineReleaseContext(github: Github, targetBranch: stri
         logger.warn(`Tag '${tag.name}' not found in recent commits on branch '${targetBranch}', skipping`);
     }
 
+    if (cachedCommits.length === 0) { // True if there are no tags
+        const commits = github.mergeCommitIterator(targetBranch);
+        for await (const commit of commits) {
+            cachedCommits.push(commit);
+        }
+    }
+
     // No tag found that is reachable from the target branch, this is the first release
     return {
         previousRelease: Version.unreleased,
