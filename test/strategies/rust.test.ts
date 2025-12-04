@@ -11,7 +11,7 @@ import { CargoToml } from "../../src/updaters/rust/cargoToml";
 import { Version } from "../../src/version";
 
 vi.mock("../../src/strategy", () => {
-    const methods = ['getData', 'saveData'];
+    const methods = ["getData", "saveData"];
     return {
         MyService: vi.fn().mockImplementation(() => {
             const mockObj: any = {};
