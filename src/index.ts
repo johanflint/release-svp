@@ -16,6 +16,7 @@ import { buildStrategy, strategyTypes } from "./strategyFactory";
 import { SemanticVersioningStrategy } from "./versioningStrategies/semantic";
 
 const LABEL_PENDING = "autorelease: pending";
+const LABEL_TAGGED = "autorelease: tagged";
 const RELEASE_BRANCH_PREFIX = "release-svp--branches-";
 
 interface GitHubArgs {
@@ -142,12 +143,18 @@ const releaseCommand: CommandModule<{}, GitHubArgs> = {
                 const comment = `:bowtie: Created release [${release.tag}](${result.url}) :tulip:`;
                 const url = await github.commentOnIssue(comment, release.pullRequestNumber);
                 logger.info(`Commented on pull request #${release.pullRequestNumber} at ${url}`);
+
+                logger.info(`Updating labels, removing '${LABEL_PENDING}'...`);
+                await github.removePullRequestLabels([LABEL_PENDING], release.pullRequestNumber);
+                logger.info(`Updating labels, adding '${LABEL_TAGGED}'...`);
+                await github.addPullRequestLabels([LABEL_TAGGED], release.pullRequestNumber);
             } catch (e) {
                 if (e instanceof DuplicateReleaseError) {
                     logger.warn(`Duplicate release tag for ${e.tagName}`);
                 }
             }
         }
+        console.info(`✅️ Created ${releases.length} release(s) 🌷️`);
     },
     command: "release",
     describe: "Create a GitHub release from a release pull request"

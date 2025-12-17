@@ -376,6 +376,33 @@ export class Github {
         });
         return response.data.html_url;
     }
+
+    async addPullRequestLabels(labels: string[], pullRequestNumber: number) {
+        if (labels.length === 0) {
+            return;
+        }
+        await this.octokit.rest.issues.addLabels({
+            owner: this.repository.owner,
+            repo: this.repository.repo,
+            issue_number: pullRequestNumber,
+            labels,
+        });
+    }
+
+    async removePullRequestLabels(labels: string[], pullRequestNumber: number) {
+        if (labels.length === 0) {
+            return;
+        }
+        await Promise.all(
+            labels.map(label => this.octokit.rest.issues.removeLabel({
+                owner: this.repository.owner,
+                repo: this.repository.repo,
+                issue_number: pullRequestNumber,
+                name: label,
+            }))
+        );
+    }
+
 }
 
 function isLightweightTag(tag: GraphQLTag): tag is LightweightTag {
