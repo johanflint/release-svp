@@ -59,6 +59,11 @@ const prepareCommand: CommandModule<{}, GitHubArgs> = {
         const targetBranch = await github.retrieveDefaultBranch();
         const releaseContext = await determineReleaseContext(github, targetBranch);
 
+        if (releaseContext.unreleasedCommits.length === 0) {
+            logger.info(`No unreleased commits, nothing to do 🕸️`);
+            return;
+        }
+
         logger.info(`Previous release is 'v${releaseContext.previousRelease}', ${releaseContext.unreleasedCommits.length} unreleased commit(s)`);
 
         const versioningStrategy = new SemanticVersioningStrategy();
@@ -134,6 +139,11 @@ const releaseCommand: CommandModule<{}, GitHubArgs> = {
 
         const releases = await determineReleases(github, targetBranch, { releaseBranchPrefix: RELEASE_BRANCH_PREFIX, labelPending: LABEL_PENDING });
 
+        if (releases.length === 0) {
+            logger.info(`Nothing to release 🐼`);
+            return;
+        }
+
         for (const release of releases) {
             logger.info(`Creating release ${release.tag} for pull request #${release.pullRequestNumber}...`);
             try {
@@ -154,6 +164,7 @@ const releaseCommand: CommandModule<{}, GitHubArgs> = {
                 }
             }
         }
+
         console.info(`✅️ Created ${releases.length} release(s) 🌷️`);
     },
     command: "release",
