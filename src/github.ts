@@ -1,12 +1,14 @@
 import { DEFAULT_FILE_MODE, FileNotFoundError, GitHubFileContents, RepositoryFileCache } from "@google-automations/git-file-utils";
 import { Octokit as RestOctokit } from "@octokit/rest";
 import { createPullRequest } from "code-suggester";
-import { Octokit } from "octokit";
+import { Octokit, RequestError } from "octokit";
+import { RequestError as RequestErrorBody } from "@octokit/types";
 import { Commit, PullRequest } from "./commit";
 import latestTagsQuery from "./graphql/latestTags.graphql";
 import mergedPullRequestsQuery from "./graphql/mergedPullRequests.graphql";
 import pullRequestsSinceQuery from "./graphql/pullRequestsSince.graphql";
 import { Logger } from "./logger";
+import { Release } from "./release";
 import { Repository } from "./repository";
 import { Tag } from "./tag";
 import { Update } from "./update";
@@ -333,6 +335,74 @@ export class Github {
             throw e;
         }
     }
+
+    async createRelease(release: Release) {
+        try {
+            const response = await this.octokit.rest.repos.createRelease({
+                name: release.tag,
+                owner: this.repository.owner,
+                repo: this.repository.repo,
+                tag_name: release.tag,
+                body: release.notes,
+                draft: false,
+                prerelease: false,
+                target_commitish: release.sha,
+            });
+
+            return {
+                id: response.data.id,
+                url: response.data.html_url,
+                pullRequestNumber: release.pullRequestNumber,
+            }
+        } catch (e) {
+            if (e instanceof RequestError) {
+                const body = e.response as { data: RequestErrorBody };
+                const errors = body?.data?.errors ?? [];
+
+                if (e.status === 422 && errors.some(error => error.code === "already_exists")) {
+                    throw new DuplicateReleaseError(e, release.tag);
+                }
+            }
+            throw e;
+        }
+    }
+
+    async commentOnIssue(comment: string, pullRequestNumber: number) {
+        const response = await this.octokit.rest.issues.createComment({
+            owner: this.repository.owner,
+            repo: this.repository.repo,
+            issue_number: pullRequestNumber,
+            body: comment,
+        });
+        return response.data.html_url;
+    }
+
+    async addPullRequestLabels(labels: string[], pullRequestNumber: number) {
+        if (labels.length === 0) {
+            return;
+        }
+        await this.octokit.rest.issues.addLabels({
+            owner: this.repository.owner,
+            repo: this.repository.repo,
+            issue_number: pullRequestNumber,
+            labels,
+        });
+    }
+
+    async removePullRequestLabels(labels: string[], pullRequestNumber: number) {
+        if (labels.length === 0) {
+            return;
+        }
+        await Promise.all(
+            labels.map(label => this.octokit.rest.issues.removeLabel({
+                owner: this.repository.owner,
+                repo: this.repository.repo,
+                issue_number: pullRequestNumber,
+                name: label,
+            }))
+        );
+    }
+
 }
 
 function isLightweightTag(tag: GraphQLTag): tag is LightweightTag {
@@ -423,4 +493,10 @@ interface PullRequestHistory {
         endCursor: string | undefined;
     };
     data: PullRequest[];
+}
+
+export class DuplicateReleaseError extends Error {
+    constructor(readonly requestError: RequestError, readonly tagName: string) {
+        super();
+    }
 }
