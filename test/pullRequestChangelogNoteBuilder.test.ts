@@ -1,4 +1,4 @@
-import { describe, expect, test } from "vitest";
+import { describe, expect, it } from "vitest";
 import { Commit } from "../src/commit";
 import { PullRequestChangelogNoteBuilder } from "../src/pullRequestChangelogNoteBuilder";
 
@@ -6,7 +6,7 @@ describe("PullRequestChangelogNoteBuilder", () => {
     describe("buildNote", () => {
         const noteBuilder = new PullRequestChangelogNoteBuilder();
 
-        test("returns null if the commit has no pull request", () => {
+        it("returns null if the commit has no pull request", () => {
             const commit: Commit = {
                 sha: "sha",
                 message: "Message",
@@ -17,12 +17,12 @@ describe("PullRequestChangelogNoteBuilder", () => {
             expect(result).toBe(null);
         });
 
-        test("returns null if the commit's pull request sha is not equal to the merge commit id", () => {
+        it("returns null if the commit's pull request sha is not equal to the merge commit id", () => {
             const result = noteBuilder.buildNote(commit(undefined, "mergeCommitId"), [], "default");
             expect(result).toBe(null);
         });
 
-        test("returns an entry with the first matching label set as type", () => {
+        it("returns an entry with the first matching label set as type", () => {
             const result = noteBuilder.buildNote(commit("beautification"), ["beautification"], "default");
             expect(result).toEqual({
                 "type": "beautification",
@@ -30,7 +30,7 @@ describe("PullRequestChangelogNoteBuilder", () => {
             });
         });
 
-        test("returns an entry with the default section if no label matches", () => {
+        it("returns an entry with the default section if no label matches", () => {
             const result = noteBuilder.buildNote(commit("beautification"), ["other"], "default");
             expect(result).toEqual({
                 "type": "default",
@@ -38,7 +38,7 @@ describe("PullRequestChangelogNoteBuilder", () => {
             });
         });
 
-        test("returns an entry with a pull request reference", () => {
+        it("returns an entry with a pull request reference", () => {
             const commitWithReference: Commit = {...commit(undefined), message: "Release v0.1.1 (#7)" };
             const result = noteBuilder.buildNote(commitWithReference, ["other"], "default");
             expect(result).toEqual({

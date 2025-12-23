@@ -1,6 +1,6 @@
 import { GitHubFileContents } from "@google-automations/git-file-utils";
 import init from "@rainbowatcher/toml-edit-js";
-import { beforeEach, describe, expect, test, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ChangelogUpdater } from "../../src/changelogUpdater";
 import { Github } from "../../src/github";
 import { logger } from "../../src/logger";
@@ -46,7 +46,7 @@ describe("RustStrategy", () => {
         vi.spyOn(github, "retrieveFileContents").mockResolvedValue(response);
     });
 
-    test("returns the changelog updater", async () => {
+    it("returns the changelog updater", async () => {
         const updates = await strategy.determineUpdates(updateOptions);
         expect(updates).toContainEqual({
             path: "CHANGELOG.md",
@@ -55,7 +55,7 @@ describe("RustStrategy", () => {
         });
     });
 
-    test("returns the Cargo.toml updater", async () => {
+    it("returns the Cargo.toml updater", async () => {
         const updates = await strategy.determineUpdates(updateOptions);
         expect(updates).toContainEqual({
             path: "Cargo.toml",
@@ -64,7 +64,7 @@ describe("RustStrategy", () => {
         });
     });
 
-    test("returns the Cargo.lock updater", async () => {
+    it("returns the Cargo.lock updater", async () => {
         const updates = await strategy.determineUpdates(updateOptions);
         expect(updates).toContainEqual({
             path: "Cargo.lock",

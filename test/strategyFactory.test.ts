@@ -1,4 +1,4 @@
-import { describe, expect, test } from "vitest";
+import { describe, expect, it } from "vitest";
 import { Github } from "../src/github";
 import { logger } from "../src/logger";
 import { RustStrategy } from "../src/strategies/rust";
@@ -7,7 +7,7 @@ import { buildStrategy, strategyTypes } from "../src/strategyFactory";
 
 describe("strategyFactory", () => {
     describe("strategyTypes", () => {
-        test("returns all strategies", () => {
+        it("returns all strategies", () => {
             expect(strategyTypes()).toEqual(["rust"]);
         });
     });
@@ -16,12 +16,12 @@ describe("strategyFactory", () => {
         const github = new Github({ owner: "", repo: "" }, "token", logger);
         const config: StrategyConfiguration = { github };
 
-        test("returns a builder for a valid strategy type", () => {
+        it("returns a builder for a valid strategy type", () => {
             const strategy = buildStrategy("rust", config);
             expect(strategy).toBeInstanceOf(RustStrategy);
         });
 
-        test("throws for unknown strategy types", () => {
+        it("throws for unknown strategy types", () => {
             expect(() => buildStrategy("invalid", config)).toThrow("Invalid strategy 'invalid'");
         });
     });

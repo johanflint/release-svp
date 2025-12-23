@@ -1,4 +1,4 @@
-import { describe, expect, test, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { PullRequest } from "../src/commit";
 import { determineReleases, ReleaseOptions } from "../src/determineReleases";
 import { Github } from "../src/github";
@@ -22,14 +22,14 @@ describe("determineReleases", () => {
     describe("with no merged pull requests", () => {
         vi.spyOn(github, "pullRequestIterator").mockImplementation(async function* () {});
 
-        test("returns no releases", async () => {
+        it("returns no releases", async () => {
             const result = await determineReleases(github, "main", options);
             expect(result.length).toBe(0);
         });
     });
 
     describe("with merged pull requests", () => {
-        test("returns a release if the head branch name prefix matches", async () => {
+        it("returns a release if the head branch name prefix matches", async () => {
             vi.spyOn(github, "pullRequestIterator").mockImplementation(async function* () {
                 yield {
                     ...defaultPullRequest,
@@ -42,7 +42,7 @@ describe("determineReleases", () => {
             expect(result).toEqual([expectedRelease]);
         });
 
-        test("returns a release if the label matches", async () => {
+        it("returns a release if the label matches", async () => {
             vi.spyOn(github, "pullRequestIterator").mockImplementation(async function* () {
                 yield {
                     ...defaultPullRequest,
@@ -55,7 +55,7 @@ describe("determineReleases", () => {
             expect(result).toEqual([expectedRelease]);
         });
 
-        test("ignores pull requests that do not match the branch name prefix or labels", async () => {
+        it("ignores pull requests that do not match the branch name prefix or labels", async () => {
             vi.spyOn(github, "pullRequestIterator").mockImplementation(async function* () {
                 yield {
                     ...defaultPullRequest,
@@ -68,7 +68,7 @@ describe("determineReleases", () => {
             expect(result.length).toBe(0);
         });
 
-        test("ignores pull requests that have been released", async () => {
+        it("ignores pull requests that have been released", async () => {
             vi.spyOn(github, "pullRequestIterator").mockImplementation(async function* () {
                 yield {
                     ...defaultPullRequest,
@@ -83,7 +83,7 @@ describe("determineReleases", () => {
             expect(result.length).toBe(0);
         });
 
-        test("ignores pull requests with invalid release notes", async () => {
+        it("ignores pull requests with invalid release notes", async () => {
             vi.spyOn(github, "pullRequestIterator").mockImplementation(async function* () {
                 yield {
                     ...defaultPullRequest,

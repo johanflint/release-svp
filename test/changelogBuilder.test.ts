@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildChangelog, ChangelogEntry, ChangelogNoteBuilder } from "../src/changelogBuilder";
 import { Commit } from "../src/commit";
 import { Version } from "../src/version";
@@ -16,7 +16,7 @@ describe("changelogBuilder", () => {
 
     const version = Version.parse("1.2.3");
 
-    test("creates a changelog header with version and date", () => {
+    it("creates a changelog header with version and date", () => {
         const notes: ChangelogNoteBuilder = {
             buildNote(): ChangelogEntry | null {
                 return null;
@@ -27,7 +27,7 @@ describe("changelogBuilder", () => {
         expect(result).toBe("## v1.2.3 (2000-09-04)\n");
     });
 
-    test("groups notes by section type and renders headings in a fixed order", () => {
+    it("groups notes by section type and renders headings in a fixed order", () => {
         const notes: ChangelogNoteBuilder = {
             buildNote(commit: Commit): ChangelogEntry | null {
                 if (commit.sha === "a") {
@@ -52,7 +52,7 @@ describe("changelogBuilder", () => {
             "- Fix broken thing\n");
     });
 
-    test("skips commits that do not produce a changelog entry", () => {
+    it("skips commits that do not produce a changelog entry", () => {
         const notes: ChangelogNoteBuilder = {
             buildNote(): ChangelogEntry | null {
                 return null;
@@ -63,7 +63,7 @@ describe("changelogBuilder", () => {
         expect(result).toBe("## v1.2.3 (2000-09-04)\n");
     });
 
-    test("renders multiple notes under the same section", () => {
+    it("renders multiple notes under the same section", () => {
         const notes: ChangelogNoteBuilder = {
             buildNote: () => ({ type: "feature", note: "Another feature" }),
         };
@@ -80,7 +80,7 @@ describe("changelogBuilder", () => {
         expect(featureSection.match(/- Another feature/g)?.length).toBe(2);
     });
 
-    test("does not render empty sections", () => {
+    it("does not render empty sections", () => {
         const notes: ChangelogNoteBuilder = {
             buildNote: () => ({
                 type: "docs",
@@ -95,7 +95,7 @@ describe("changelogBuilder", () => {
         expect(result).not.toContain("### Bug Fixes");
     });
 
-    test("passes all section keys and default section to the note builder", () => {
+    it("passes all section keys and default section to the note builder", () => {
         const buildNote = vi.fn().mockReturnValue(null);
         const notes: ChangelogNoteBuilder = { buildNote };
 

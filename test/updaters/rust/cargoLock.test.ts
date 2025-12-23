@@ -1,7 +1,7 @@
 import init from "@rainbowatcher/toml-edit-js";
 import { readFileSync } from "fs";
 import { resolve } from "path";
-import { describe, expect, test } from "vitest";
+import { describe, expect, it } from "vitest";
 import { CargoLock } from "../../../src/updaters/rust/cargoLock";
 import { Version } from "../../../src/version";
 
@@ -12,7 +12,7 @@ describe("CargoLock", () => {
     const versionsMap = new Map<string, Version>([["package", releaseVersion]]);
     const updater = new CargoLock(versionsMap);
 
-    test("updates the content", async () => {
+    it("updates the content", async () => {
         await init();
 
         const oldCargoLock = readFileSync(resolve(fixturesPath, "./Cargo.lock"), "utf8").replace(/\r\n/g, "\n")
