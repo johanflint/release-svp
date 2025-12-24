@@ -1,4 +1,4 @@
-import { expect, test, describe } from "vitest"
+import { describe, expect, it } from "vitest";
 import { Commit } from "../../src/commit";
 import { SemanticVersioningStrategy } from "../../src/versioningStrategies/semantic";
 import { MajorVersionUpdate, MinorVersionUpdate, PatchVersionUpdate } from "../../src/versioningStrategy";
@@ -26,7 +26,7 @@ describe("SemanticVersioningStrategy", () => {
                 }
             }];
 
-        test("returns the major version update", async () => {
+        it("returns the major version update", async () => {
             const strategy = new SemanticVersioningStrategy();
             expect(strategy.releaseType(commits)).toBeInstanceOf(MajorVersionUpdate);
         });
@@ -50,7 +50,7 @@ describe("SemanticVersioningStrategy", () => {
             }
         }];
 
-        test("returns the minor version update", async () => {
+        it("returns the minor version update", async () => {
             const strategy = new SemanticVersioningStrategy();
             expect(strategy.releaseType(commits)).toBeInstanceOf(MinorVersionUpdate);
         });
@@ -74,7 +74,7 @@ describe("SemanticVersioningStrategy", () => {
             }
         }];
 
-        test("returns the patch version update", async () => {
+        it("returns the patch version update", async () => {
             const strategy = new SemanticVersioningStrategy();
             expect(strategy.releaseType(commits)).toBeInstanceOf(PatchVersionUpdate);
         });

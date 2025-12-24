@@ -37,27 +37,8 @@ export class Github {
     }
 
     async *tagIterator(maxResults?: number) {
-        let cursor: string | undefined = undefined;
-        let results = 0;
-        const maxAllowedResults = maxResults ?? Number.MAX_SAFE_INTEGER;
-        while (results < maxAllowedResults) {
-            const response = await this.tagsGraphQL(cursor);
-
-            if (!response) {
-                break;
-            }
-
-            for (let x = 0; x < response.data.length; x++) {
-                results += 1;
-                yield response.data[x];
-            }
-
-            if (!response.pageInfo.hasNextPage) {
-                break;
-            }
-
-            cursor = response.pageInfo.endCursor;
-        }
+        const fetchPage = (cursor?: string | undefined) => this.tagsGraphQL(cursor);
+        yield* paginate(fetchPage, maxResults);
     }
 
     private async tagsGraphQL(cursor?: string): Promise<Tags | null> {
@@ -93,28 +74,8 @@ export class Github {
     }
 
     async *mergeCommitIterator(branch: string, maxResults?: number) {
-        let cursor: string | undefined = undefined;
-        let results = 0;
-        const maxAllowedResults = maxResults ?? Number.MAX_SAFE_INTEGER;
-        while (results < maxAllowedResults) {
-            const response = await this.mergeCommitsGraphQL(branch, cursor);
-
-            // Branch cannot be found
-            if (!response) {
-                break;
-            }
-
-            for (let x = 0; x < response.data.length; x++) {
-                results += 1;
-                yield response.data[x];
-            }
-
-            if (!response.pageInfo.hasNextPage) {
-                break;
-            }
-
-            cursor = response.pageInfo.endCursor;
-        }
+        const fetchPage = (cursor?: string | undefined) => this.mergeCommitsGraphQL(branch, cursor);
+        yield* paginate(fetchPage, maxResults);
     }
 
     private async mergeCommitsGraphQL(targetBranch: string, cursor?: string): Promise<CommitHistory | null> {
@@ -264,27 +225,8 @@ export class Github {
     }
 
     async *pullRequestIterator(targetBranch: string, status: "OPEN" | "CLOSED" | "MERGED" = "MERGED", maxResults?: number) {
-        let cursor: string | undefined = undefined;
-        let results = 0;
-        const maxAllowedResults = maxResults ?? Number.MAX_SAFE_INTEGER;
-        while (results < maxAllowedResults) {
-            const response = await this.pullRequestsGraphQL(targetBranch, status, cursor);
-
-            if (!response) {
-                break;
-            }
-
-            for (let x = 0; x < response.data.length; x++) {
-                results += 1;
-                yield response.data[x];
-            }
-
-            if (!response.pageInfo.hasNextPage) {
-                break;
-            }
-
-            cursor = response.pageInfo.endCursor;
-        }
+        const fetchPage = (cursor?: string | undefined) => this.pullRequestsGraphQL(targetBranch, status, cursor);
+        yield* paginate(fetchPage, maxResults);
     }
 
     private async pullRequestsGraphQL(targetBranch: string, status: "OPEN" | "CLOSED" | "MERGED" = "MERGED", cursor?: string): Promise<PullRequestHistory | null> {
@@ -409,13 +351,7 @@ function isLightweightTag(tag: GraphQLTag): tag is LightweightTag {
     return tag.target.hasOwnProperty("oid");
 }
 
-interface Tags {
-    pageInfo: {
-        hasNextPage: boolean;
-        endCursor: string | undefined;
-    };
-    data: Tag[];
-}
+interface Tags extends Response<Tag> {}
 
 interface GraphQLTag {
     name: string;
@@ -471,13 +407,7 @@ interface GraphQLPullRequest {
     };
 }
 
-interface CommitHistory {
-    pageInfo: {
-        hasNextPage: boolean;
-        endCursor: string | undefined;
-    };
-    data: Commit[];
-}
+interface CommitHistory extends Response<Commit> {}
 
 interface FileDiff {
     readonly mode: "100644" | "100755" | "040000" | "160000" | "120000";
@@ -486,17 +416,47 @@ interface FileDiff {
 }
 type ChangeSet = Map<string, FileDiff>;
 
-
-interface PullRequestHistory {
-    pageInfo: {
-        hasNextPage: boolean;
-        endCursor: string | undefined;
-    };
-    data: PullRequest[];
-}
+interface PullRequestHistory extends Response<PullRequest> {}
 
 export class DuplicateReleaseError extends Error {
     constructor(readonly requestError: RequestError, readonly tagName: string) {
         super();
+    }
+}
+
+type PageInfo = {
+    hasNextPage: boolean;
+    endCursor: string | undefined;
+}
+
+type Response<T> = {
+    data: T[];
+    pageInfo: PageInfo;
+}
+
+async function *paginate<T>(
+    fetchPage: (cursor?: string) => Promise<Response<T> | null>,
+    maxResults: number = Number.MAX_SAFE_INTEGER
+): AsyncGenerator<T> {
+    let cursor: string | undefined = undefined;
+    let results = 0;
+
+    while (results < maxResults) {
+        const response = await fetchPage(cursor);
+
+        if (!response) {
+            break;
+        }
+
+        for (let x = 0; x < response.data.length; x++) {
+            results += 1;
+            yield response.data[x];
+        }
+
+        if (!response.pageInfo.hasNextPage) {
+            break;
+        }
+
+        cursor = response.pageInfo.endCursor;
     }
 }

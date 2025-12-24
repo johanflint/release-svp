@@ -1,6 +1,6 @@
-import { describe, expect, test } from "vitest";
+import { describe, expect, it } from "vitest";
 import { PullRequest } from "../src/commit";
-import { createPullRequestBody, PullRequestBody } from "../src/pullRequestBody";
+import { createPullRequestBody } from "../src/pullRequestBody";
 import { buildRelease } from "../src/release";
 
 describe("buildRelease", () => {
@@ -15,22 +15,22 @@ describe("buildRelease", () => {
         labels: ["autorelease: pending"],
     }
 
-    test("returns undefined if no sha is available", () => {
+    it("returns undefined if no sha is available", () => {
         const release = buildRelease({...pullRequest, sha: undefined });
         expect(release).toBeUndefined();
     });
 
-    test("returns undefined if the pull request body cannot be parsed", () => {
+    it("returns undefined if the pull request body cannot be parsed", () => {
         const release = buildRelease({...pullRequest, body: "My release" });
         expect(release).toBeUndefined();
     });
 
-    test("returns undefined if the pull request body contains no version string", () => {
+    it("returns undefined if the pull request body contains no version string", () => {
         const release = buildRelease({...pullRequest, body: createPullRequestBody(changelogWithoutVersion) });
         expect(release).toBeUndefined();
     });
 
-    test("returns a release if all release info is present", () => {
+    it("returns a release if all release info is present", () => {
         const release = buildRelease(pullRequest);
 
         expect(release?.sha).toBe("sha");
@@ -38,7 +38,7 @@ describe("buildRelease", () => {
         expect(release?.notes).toBe(changelog.trim());
     });
 
-    test("returns a release if all release info is present if the pull request body contains no footer delimiter", () => {
+    it("returns a release if all release info is present if the pull request body contains no footer delimiter", () => {
         const release = buildRelease({...pullRequest, body: pullRequestBodyNoFooterDelimiter });
 
         expect(release?.sha).toBe("sha");

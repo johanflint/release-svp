@@ -1,4 +1,4 @@
-import { describe, test } from "vitest";
+import { describe, it, test } from "vitest";
 import { parseVersionTag } from "../src/parseVersionTag";
 import { Version } from "../src/version";
 
@@ -13,11 +13,11 @@ describe("parseVersionTag", () => {
         expect(parseVersionTag(input)).toEqual(expected);
     });
 
-    test("parses a version prefixed with v", ({ expect }) => {
+    it("parses a version prefixed with v", ({ expect }) => {
         expect(parseVersionTag("v1.2.3-beta+45")).toEqual(new Version(1, 2, 3, "beta", "45"));
     });
 
-    test("returns undefined otherwise", ({ expect }) => {
+    it("returns undefined otherwise", ({ expect }) => {
         expect(parseVersionTag("my-tag")).toEqual(undefined);
     });
 });

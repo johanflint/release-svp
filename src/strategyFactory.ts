@@ -17,5 +17,5 @@ export function buildStrategy(strategyType: keyof typeof strategies, config: Str
         return builder(config);
     }
 
-    throw "Invalid strategy";
+    throw `Invalid strategy '${strategyType}'`;
 }

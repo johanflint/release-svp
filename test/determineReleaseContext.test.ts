@@ -1,11 +1,11 @@
-import { describe, expect, test, vi } from "vitest";
+import { createHash } from "crypto";
+import { describe, expect, it, vi } from "vitest";
 import { Commit } from "../src/commit";
 import { determineReleaseContext } from "../src/determineReleaseContext";
 import { Github } from "../src/github";
 import { logger } from "../src/logger";
 import { Tag } from "../src/tag";
 import { Version } from "../src/version";
-import { createHash } from "crypto";
 
 describe("determineReleaseContext", () => {
     const github = new Github({ repo: "repo", owner: "owner" }, "token", logger);
@@ -16,7 +16,7 @@ describe("determineReleaseContext", () => {
     const initialCommit = createCommit("Initial commit");
 
     describe("without tags", () => {
-        test("returns an unreleased version and all commits", async () => {
+        it("returns an unreleased version and all commits", async () => {
             vi.spyOn(github, "tagIterator").mockImplementation(async function* (): AsyncGenerator<Tag> {});
             vi.spyOn(github, "mergeCommitIterator").mockImplementation(async function* () {
                 yield fixCommit;
@@ -30,7 +30,7 @@ describe("determineReleaseContext", () => {
     });
 
     describe("with a previous release tag", () => {
-        test("returns the previous release version and unreleased commits", async () => {
+        it("returns the previous release version and unreleased commits", async () => {
             vi.spyOn(github, "tagIterator").mockImplementation(async function* (): AsyncGenerator<Tag> {
                 yield { sha: "", name: "ignored-tag", committedDate: "" }
                 yield { sha: previousReleaseCommit.sha, name: "0.1.0", committedDate: "" }
@@ -48,7 +48,7 @@ describe("determineReleaseContext", () => {
     });
 
     describe("with a previous release tag not on the default branch", () => {
-        test("returns an unreleased version and all commits", async () => {
+        it("returns an unreleased version and all commits", async () => {
             vi.spyOn(github, "tagIterator").mockImplementation(async function* (): AsyncGenerator<Tag> {
                 yield { sha: "", name: "ignored-tag", committedDate: "" }
                 yield { sha: "", name: "0.1.0", committedDate: "" }
