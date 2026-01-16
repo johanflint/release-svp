@@ -1,12 +1,15 @@
 import init from "@rainbowatcher/toml-edit-js";
+import { RequestError } from "octokit";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { buildChangelog } from "../src/changelogBuilder";
 import { PullRequest } from "../src/commit";
 import { determineReleaseContext } from "../src/determineReleaseContext";
-import { Github } from "../src/github";
+import { determineReleases } from "../src/determineReleases";
+import { DuplicateReleaseError, Github } from "../src/github";
 import { logger } from "../src/logger";
 import { Manifest } from "../src/manifest";
 import { createPullRequestBody } from "../src/pullRequestBody";
+import { Release } from "../src/release";
 import { UpdateOptions } from "../src/strategy";
 import { buildStrategy } from "../src/strategyFactory";
 import { Update } from "../src/update";
@@ -16,8 +19,10 @@ vi.mock("@rainbowatcher/toml-edit-js", () => ({
     default: vi.fn(),
 }));
 
-vi.mock("../src/github", () => {
+vi.mock("../src/github", async () => {
+    const actual = await vi.importActual("../src/github");
     return {
+        ...actual,
         Github: vi.fn(),
     };
 });
@@ -38,6 +43,12 @@ vi.mock("../src/strategyFactory", () => {
     return {
         buildStrategy: vi.fn(),
     };
+});
+
+vi.mock("../src/determineReleases", () => {
+    return {
+        determineReleases: vi.fn(),
+    }
 });
 
 describe("Manifest", () => {
@@ -347,6 +358,107 @@ describe("Manifest", () => {
             });
         });
     });
+
+    describe("#release", () => {
+        const release: Release = {
+            sha: "sha0",
+            tag: "v1.2.4",
+            notes: "notes",
+            pullRequestNumber: 4,
+        }
+
+        it("does nothing if there is nothing to release", async () => {
+            const githubMock = createGithubMock();
+            vi.spyOn(logger, "info");
+
+            vi.mocked(determineReleases).mockResolvedValue([]);
+
+            const result = await Manifest.create("owner/repo", token);
+            expect(result).not.toBeNull();
+
+            await result.release();
+
+            expect(logger.info).toHaveBeenCalledWith(`Nothing to release 🐼`);
+            expect(githubMock.createRelease).not.toHaveBeenCalled();
+        });
+
+        it("creates a release for every release", async () => {
+            const githubMock = createGithubMock();
+
+            vi.mocked(determineReleases).mockResolvedValue([release]);
+            vi.mocked(githubMock.createRelease).mockResolvedValue({ id: "id", url: "url", pullRequestNumber: 4 });
+
+            const result = await Manifest.create("owner/repo", token);
+            expect(result).not.toBeNull();
+
+            await result.release();
+
+            expect(githubMock.createRelease).toHaveBeenCalledWith(release);
+        });
+
+        it("creates a comment on every release", async () => {
+            const githubMock = createGithubMock();
+
+            vi.mocked(determineReleases).mockResolvedValue([release]);
+            vi.mocked(githubMock.createRelease).mockResolvedValue({ id: "id", url: "url", pullRequestNumber: 4 });
+
+            const result = await Manifest.create("owner/repo", token);
+            expect(result).not.toBeNull();
+
+            await result.release();
+
+            expect(githubMock.createRelease).toHaveBeenCalledWith(release);
+            expect(githubMock.commentOnIssue).toHaveBeenCalledWith(":bowtie: Created release [v1.2.4](url) :tulip:", 4);
+        });
+
+        it("updates the labels on every release", async () => {
+            const githubMock = createGithubMock();
+
+            vi.mocked(determineReleases).mockResolvedValue([release]);
+            vi.mocked(githubMock.createRelease).mockResolvedValue({ id: "id", url: "url", pullRequestNumber: 4 });
+
+            const result = await Manifest.create("owner/repo", token);
+            expect(result).not.toBeNull();
+
+            await result.release();
+
+            expect(githubMock.createRelease).toHaveBeenCalledWith(release);
+            expect(githubMock.removePullRequestLabels).toHaveBeenCalledWith(["autorelease: pending"], 4);
+            expect(githubMock.addPullRequestLabels).toHaveBeenCalledWith(["autorelease: tagged"], 4);
+        });
+
+        it("logs a warning for duplicate release tags", async () => {
+            const githubMock = createGithubMock();
+            vi.spyOn(logger, "warn");
+
+            vi.mocked(determineReleases).mockResolvedValue([release]);
+            vi.mocked(githubMock.createRelease).mockRejectedValue(new DuplicateReleaseError(new RequestError("", 400, {request: { method: "GET", url: "", headers: {}}}), "v1.2.4"));
+
+            const result = await Manifest.create("owner/repo", token);
+            expect(result).not.toBeNull();
+
+            await result.release();
+
+            expect(githubMock.createRelease).toHaveBeenCalledWith(release);
+            expect(logger.warn).toHaveBeenCalledWith(`Duplicate release tag for v1.2.4`);
+            expect(githubMock.commentOnIssue).not.toHaveBeenCalledWith(":bowtie: Created release [v1.2.4](url) :tulip:", 4);
+        });
+
+        it("throws unexpected exceptions", async () => {
+            const githubMock = createGithubMock();
+            vi.spyOn(logger, "warn");
+
+            vi.mocked(determineReleases).mockResolvedValue([release]);
+            vi.mocked(githubMock.createRelease).mockRejectedValue(new Error("boom"));
+
+            const result = await Manifest.create("owner/repo", token);
+            expect(result).not.toBeNull();
+
+            await expect(
+                result.release()
+            ).rejects.toThrow("boom");
+        });
+    });
 });
 
 function createGithubMock(overrides?: Partial<Github>) {
@@ -355,6 +467,10 @@ function createGithubMock(overrides?: Partial<Github>) {
         createPullRequest: vi.fn(),
         updatePullRequest: vi.fn(),
         pullRequestIterator: vi.fn(),
+        createRelease: vi.fn(),
+        commentOnIssue: vi.fn(),
+        removePullRequestLabels: vi.fn(),
+        addPullRequestLabels: vi.fn(),
         ...overrides,
     };
 

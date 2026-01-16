@@ -2,7 +2,8 @@ import init from "@rainbowatcher/toml-edit-js";
 import { buildChangelog } from "./changelogBuilder";
 import { PullRequest } from "./commit";
 import { determineReleaseContext } from "./determineReleaseContext";
-import { Github } from "./github";
+import { determineReleases } from "./determineReleases";
+import { DuplicateReleaseError, Github } from "./github";
 import { logger, Logger, logger as defaultLogger } from "./logger";
 import { createPullRequestBody } from "./pullRequestBody";
 import { PullRequestChangelogNoteBuilder } from "./pullRequestChangelogNoteBuilder";
@@ -12,6 +13,7 @@ import { buildStrategy } from "./strategyFactory";
 import { SemanticVersioningStrategy } from "./versioningStrategies/semantic";
 
 const LABEL_PENDING = "autorelease: pending";
+const LABEL_TAGGED = "autorelease: tagged";
 const RELEASE_BRANCH_PREFIX = "release-svp--branches-";
 
 export class Manifest {
@@ -80,6 +82,40 @@ export class Manifest {
             }
         }
         return undefined;
+    }
+
+    async release() {
+        const releases = await determineReleases(this.github, this.targetBranch, { releaseBranchPrefix: RELEASE_BRANCH_PREFIX, labelPending: LABEL_PENDING });
+
+        if (releases.length === 0) {
+            logger.info(`Nothing to release 🐼`);
+            return;
+        }
+
+        for (const release of releases) {
+            logger.info(`Creating release ${release.tag} for pull request #${release.pullRequestNumber}...`);
+            try {
+                const result = await this.github.createRelease(release);
+                logger.info(`Created release ${result.id} at ${result.url}`);
+
+                const comment = `:bowtie: Created release [${release.tag}](${result.url}) :tulip:`;
+                const url = await this.github.commentOnIssue(comment, release.pullRequestNumber);
+                logger.info(`Commented on pull request #${release.pullRequestNumber} at ${url}`);
+
+                logger.info(`Updating labels, removing '${LABEL_PENDING}'...`);
+                await this.github.removePullRequestLabels([LABEL_PENDING], release.pullRequestNumber);
+                logger.info(`Updating labels, adding '${LABEL_TAGGED}'...`);
+                await this.github.addPullRequestLabels([LABEL_TAGGED], release.pullRequestNumber);
+            } catch (e) {
+                if (e instanceof DuplicateReleaseError) {
+                    logger.warn(`Duplicate release tag for ${e.tagName}`);
+                } else {
+                    throw e;
+                }
+            }
+        }
+
+        console.info(`✅️ Created ${releases.length} release(s) 🌷️`);
     }
 
     static async create(repositoryUrl: string, githubToken: string, logger: Logger = defaultLogger): Promise<Manifest | null> {
