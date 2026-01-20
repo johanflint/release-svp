@@ -376,7 +376,7 @@ describe("Manifest", () => {
             const result = await Manifest.create("owner/repo", token);
             expect(result).not.toBeNull();
 
-            await result.release();
+            await result!.release();
 
             expect(logger.info).toHaveBeenCalledWith(`Nothing to release 🐼`);
             expect(githubMock.createRelease).not.toHaveBeenCalled();
@@ -386,12 +386,12 @@ describe("Manifest", () => {
             const githubMock = createGithubMock();
 
             vi.mocked(determineReleases).mockResolvedValue([release]);
-            vi.mocked(githubMock.createRelease).mockResolvedValue({ id: "id", url: "url", pullRequestNumber: 4 });
+            vi.mocked(githubMock.createRelease).mockResolvedValue({ id: 1, url: "url", pullRequestNumber: 4 });
 
             const result = await Manifest.create("owner/repo", token);
             expect(result).not.toBeNull();
 
-            await result.release();
+            await result!.release();
 
             expect(githubMock.createRelease).toHaveBeenCalledWith(release);
         });
@@ -400,12 +400,12 @@ describe("Manifest", () => {
             const githubMock = createGithubMock();
 
             vi.mocked(determineReleases).mockResolvedValue([release]);
-            vi.mocked(githubMock.createRelease).mockResolvedValue({ id: "id", url: "url", pullRequestNumber: 4 });
+            vi.mocked(githubMock.createRelease).mockResolvedValue({ id: 1, url: "url", pullRequestNumber: 4 });
 
             const result = await Manifest.create("owner/repo", token);
             expect(result).not.toBeNull();
 
-            await result.release();
+            await result!.release();
 
             expect(githubMock.createRelease).toHaveBeenCalledWith(release);
             expect(githubMock.commentOnIssue).toHaveBeenCalledWith(":bowtie: Created release [v1.2.4](url) :tulip:", 4);
@@ -415,12 +415,12 @@ describe("Manifest", () => {
             const githubMock = createGithubMock();
 
             vi.mocked(determineReleases).mockResolvedValue([release]);
-            vi.mocked(githubMock.createRelease).mockResolvedValue({ id: "id", url: "url", pullRequestNumber: 4 });
+            vi.mocked(githubMock.createRelease).mockResolvedValue({ id: 1, url: "url", pullRequestNumber: 4 });
 
             const result = await Manifest.create("owner/repo", token);
             expect(result).not.toBeNull();
 
-            await result.release();
+            await result!.release();
 
             expect(githubMock.createRelease).toHaveBeenCalledWith(release);
             expect(githubMock.removePullRequestLabels).toHaveBeenCalledWith(["autorelease: pending"], 4);
@@ -437,7 +437,7 @@ describe("Manifest", () => {
             const result = await Manifest.create("owner/repo", token);
             expect(result).not.toBeNull();
 
-            await result.release();
+            await result!.release();
 
             expect(githubMock.createRelease).toHaveBeenCalledWith(release);
             expect(logger.warn).toHaveBeenCalledWith(`Duplicate release tag for v1.2.4`);
@@ -455,7 +455,7 @@ describe("Manifest", () => {
             expect(result).not.toBeNull();
 
             await expect(
-                result.release()
+                result!.release()
             ).rejects.toThrow("boom");
         });
     });
@@ -477,7 +477,7 @@ function createGithubMock(overrides?: Partial<Github>) {
     vi.mocked(Github).mockImplementation(function GithubMock(this: any) {
         Object.assign(this, mock);
     });
-    return mock;
+    return mock as Github;
 }
 
 function expectReleasePullRequest(overrides?: Partial<PullRequest>, version: string = "1.2.4") {
