@@ -255,7 +255,7 @@ export class Github {
                     sha: pullRequest.mergeCommit?.oid, // already filtered non-merged
                     number: pullRequest.number,
                     title: pullRequest.title,
-                    body: pullRequest.body + '',
+                    body: pullRequest.body || '',
                     permalink: pullRequest.permalink,
                     headBranchName: pullRequest.headRefName,
                     baseBranchName: pullRequest.baseRefName,

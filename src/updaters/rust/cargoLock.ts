@@ -10,8 +10,9 @@ export class CargoLock implements Updater {
         const packages: Array<CargoPackage> = document["package"] ?? [];
 
         return packages
-            .filter((pkg) => this.versionsMap.has(pkg.name))
-            .reduce((updatedContent: string, pkg: CargoPackage, index: number) =>
+            .map((pkg, index) => ({ pkg, index }))
+            .filter(({ pkg }) => this.versionsMap.has(pkg.name))
+            .reduce((updatedContent: string, { pkg, index }) =>
                     edit(updatedContent, `package.[${index}].version`, `${this.versionsMap.get(pkg.name)}`)
                 , content ?? "");
     }
