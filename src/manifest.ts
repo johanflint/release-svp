@@ -132,6 +132,13 @@ export class Manifest {
         const targetBranch = await github.retrieveDefaultBranch();
         return new Manifest(github, repository, targetBranch);
     }
+
+    // Builds a Manifest for a single component, reusing an already-configured Github client, repository and
+    // target branch. Used by ManifestRunner so that resolving the repository/branch/wasm init happens once per
+    // run, regardless of how many components it processes.
+    static forComponent(github: Github, repository: Repository, targetBranch: string): Manifest {
+        return new Manifest(github, repository, targetBranch);
+    }
 }
 
 function parseGitHubUrl(url: string): Repository {

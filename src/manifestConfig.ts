@@ -8,6 +8,10 @@ export interface ManifestConfig {
     readonly components: readonly ComponentConfig[];
 }
 
+// A ManifestConfig with `targetBranch` resolved to a concrete branch (falling back to the repository's default
+// branch when the config doesn't specify one), as produced once resolution has happened.
+export type ResolvedManifestConfig = Omit<ManifestConfig, "targetBranch"> & { readonly targetBranch: string };
+
 export interface ComponentConfig {
     // Directory (relative to the repository root) this component owns, normalized without leading/trailing slashes.
     // An empty string means the component owns the repository root (and anything not claimed by a more specific path).
