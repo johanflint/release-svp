@@ -25,8 +25,11 @@ export class ManifestRunner {
         private readonly migration?: MigrationConfig,
     ) {}
 
-    async prepare(): Promise<void> {
+    // Returns `false` if any component failed to prepare, so the caller (e.g. the CLI entrypoint) can reflect
+    // that in the process exit status, while still isolating each component's failure from the others below.
+    async prepare(): Promise<boolean> {
         const allComponentPaths = this.components.map(component => component.path);
+        let allSucceeded = true;
         for (const component of this.components) {
             const label = componentLabel(component);
             logger.info(`--- Preparing release for component '${label}' ---`);
@@ -35,12 +38,17 @@ export class ManifestRunner {
                     .prepare(component.releaseType);
             } catch (e) {
                 logger.error(`Failed to prepare release for component '${label}'`, e);
+                allSucceeded = false;
             }
         }
+        return allSucceeded;
     }
 
-    async release(): Promise<void> {
+    // Returns `false` if any component failed to release, so the caller (e.g. the CLI entrypoint) can reflect
+    // that in the process exit status, while still isolating each component's failure from the others below.
+    async release(): Promise<boolean> {
         const allComponentPaths = this.components.map(component => component.path);
+        let allSucceeded = true;
         for (const component of this.components) {
             const label = componentLabel(component);
             logger.info(`--- Creating release(s) for component '${label}' ---`);
@@ -49,8 +57,10 @@ export class ManifestRunner {
                     .release();
             } catch (e) {
                 logger.error(`Failed to create release(s) for component '${label}'`, e);
+                allSucceeded = false;
             }
         }
+        return allSucceeded;
     }
 
     // Note: `cliReleaseType` is only used as a fallback for repositories without a `release-svp-config.json`,

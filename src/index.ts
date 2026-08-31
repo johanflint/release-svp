@@ -32,7 +32,9 @@ const prepareCommand: CommandModule<{}, GitHubArgs> = {
     },
     async handler(args: ArgumentsCamelCase<GitHubArgs>) {
         const runner = await ManifestRunner.create(args.repoUrl ?? "", args.token ?? "", args.releaseType as string | undefined, logger);
-        await runner?.prepare();
+        if (!runner || !(await runner.prepare())) {
+            process.exitCode = 1;
+        }
     },
     command: "prepare",
     describe: "Create or update a pull request representing the next release"
@@ -44,7 +46,9 @@ const releaseCommand: CommandModule<{}, GitHubArgs> = {
     },
     async handler(args: ArgumentsCamelCase<GitHubArgs>) {
         const runner = await ManifestRunner.create(args.repoUrl ?? "", args.token ?? "", args.releaseType as string | undefined, logger);
-        await runner?.release();
+        if (!runner || !(await runner.release())) {
+            process.exitCode = 1;
+        }
     },
     command: "release",
     describe: "Create a GitHub release from a release pull request"

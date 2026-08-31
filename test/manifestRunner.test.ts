@@ -212,6 +212,49 @@ describe("ManifestRunner", () => {
             expect(logger.error).toHaveBeenCalledWith("Failed to prepare release for component 'project-a'", expect.any(Error));
         });
 
+        it("returns false when any component fails to prepare", async () => {
+            createGithubMock({
+                retrieveFileContents: vi.fn().mockResolvedValue({
+                    parsedContent: JSON.stringify({
+                        components: [
+                            { path: "a", component: "project-a", releaseType: "rust" },
+                            { path: "b", component: "project-b", releaseType: "rust" },
+                        ],
+                    }),
+                }),
+            });
+
+            const result = await ManifestRunner.create("owner/repo", token, undefined, logger);
+            expect(result).not.toBeNull();
+
+            vi.mocked(Manifest.forComponent)
+                .mockReturnValueOnce({ prepare: vi.fn().mockRejectedValue(new Error("boom")) } as unknown as Manifest)
+                .mockReturnValueOnce({ prepare: vi.fn().mockResolvedValue(undefined) } as unknown as Manifest);
+            vi.spyOn(logger, "error");
+
+            await expect(result!.prepare()).resolves.toBe(false);
+        });
+
+        it("returns true when every component prepares successfully", async () => {
+            createGithubMock({
+                retrieveFileContents: vi.fn().mockResolvedValue({
+                    parsedContent: JSON.stringify({
+                        components: [
+                            { path: "a", component: "project-a", releaseType: "rust" },
+                            { path: "b", component: "project-b", releaseType: "rust" },
+                        ],
+                    }),
+                }),
+            });
+
+            const result = await ManifestRunner.create("owner/repo", token, undefined, logger);
+            expect(result).not.toBeNull();
+
+            vi.mocked(Manifest.forComponent).mockReturnValue({ prepare: vi.fn().mockResolvedValue(undefined) } as unknown as Manifest);
+
+            await expect(result!.prepare()).resolves.toBe(true);
+        });
+
         it("labels the implicit root component as '<root>' in log output", async () => {
             createGithubMock({
                 retrieveFileContents: vi.fn().mockRejectedValue(new FileNotFoundError("release-svp-config.json")),
@@ -259,6 +302,49 @@ describe("ManifestRunner", () => {
             expect(releaseA).toHaveBeenCalledOnce();
             expect(releaseB).toHaveBeenCalledOnce();
             expect(logger.error).toHaveBeenCalledWith("Failed to create release(s) for component 'project-b'", expect.any(Error));
+        });
+
+        it("returns false when any component fails to release", async () => {
+            createGithubMock({
+                retrieveFileContents: vi.fn().mockResolvedValue({
+                    parsedContent: JSON.stringify({
+                        components: [
+                            { path: "a", component: "project-a", releaseType: "rust" },
+                            { path: "b", component: "project-b", releaseType: "rust" },
+                        ],
+                    }),
+                }),
+            });
+
+            const result = await ManifestRunner.create("owner/repo", token, undefined, logger);
+            expect(result).not.toBeNull();
+
+            vi.mocked(Manifest.forComponent)
+                .mockReturnValueOnce({ release: vi.fn().mockResolvedValue(undefined) } as unknown as Manifest)
+                .mockReturnValueOnce({ release: vi.fn().mockRejectedValue(new Error("boom")) } as unknown as Manifest);
+            vi.spyOn(logger, "error");
+
+            await expect(result!.release()).resolves.toBe(false);
+        });
+
+        it("returns true when every component releases successfully", async () => {
+            createGithubMock({
+                retrieveFileContents: vi.fn().mockResolvedValue({
+                    parsedContent: JSON.stringify({
+                        components: [
+                            { path: "a", component: "project-a", releaseType: "rust" },
+                            { path: "b", component: "project-b", releaseType: "rust" },
+                        ],
+                    }),
+                }),
+            });
+
+            const result = await ManifestRunner.create("owner/repo", token, undefined, logger);
+            expect(result).not.toBeNull();
+
+            vi.mocked(Manifest.forComponent).mockReturnValue({ release: vi.fn().mockResolvedValue(undefined) } as unknown as Manifest);
+
+            await expect(result!.release()).resolves.toBe(true);
         });
     });
 });
