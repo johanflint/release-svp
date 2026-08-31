@@ -486,7 +486,7 @@ describe("Manifest", () => {
             const manifest = Manifest.forComponent(github, { owner: "owner", repo: "repo" }, "main", "api");
             await manifest.prepare("rust");
 
-            expect(determineReleaseContext).toHaveBeenCalledWith(expect.anything(), "main", "api-");
+            expect(determineReleaseContext).toHaveBeenCalledWith(expect.anything(), "main", "api-", "", [""]);
             expect(githubMock.createPullRequest).toHaveBeenCalledWith(
                 expect.objectContaining({
                     headBranchName: "release-svp--branches-main--api",

@@ -136,7 +136,7 @@ describe("ManifestRunner", () => {
 
                 await result!.prepare();
 
-                expect(Manifest.forComponent).toHaveBeenCalledWith(expect.anything(), expect.anything(), "trunk", "project-b");
+                expect(Manifest.forComponent).toHaveBeenCalledWith(expect.anything(), expect.anything(), "trunk", "project-b", "b", ["b"]);
             });
         });
     });

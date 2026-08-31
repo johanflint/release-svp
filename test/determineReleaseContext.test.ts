@@ -67,6 +67,54 @@ describe("determineReleaseContext", () => {
         });
     });
 
+    describe("with path-based component filtering", () => {
+        const componentACommit = createMergeCommit(2, "Add a-feature", ["a/lib.rs"]);
+        const componentBCommit = createMergeCommit(3, "Add b-feature", ["b/lib.rs"]);
+        // A commit with no associated pull request (e.g. a direct push) has no changed-file data available at
+        // all; it must only ever be attributed to the root component (see componentPathFilter.ts).
+        const noPullRequestCommit = createCommit("Direct push");
+
+        it("only returns commits owned by the given component path", async () => {
+            vi.spyOn(github, "tagIterator").mockImplementation(async function* (): AsyncGenerator<Tag> {});
+            vi.spyOn(github, "mergeCommitIterator").mockImplementation(async function* () {
+                yield componentACommit;
+                yield componentBCommit;
+                yield noPullRequestCommit;
+            });
+
+            const result = await determineReleaseContext(github, "main", "a-", "a", ["a", "b"]);
+            expect(result.unreleasedCommits).toEqual([componentACommit]);
+        });
+
+        it("attributes commits with no changed-file data only to the root component", async () => {
+            vi.spyOn(github, "tagIterator").mockImplementation(async function* (): AsyncGenerator<Tag> {});
+            vi.spyOn(github, "mergeCommitIterator").mockImplementation(async function* () {
+                yield componentACommit;
+                yield componentBCommit;
+                yield noPullRequestCommit;
+            });
+
+            const result = await determineReleaseContext(github, "main", "", "", ["a", "b"]);
+            expect(result.unreleasedCommits).toEqual([noPullRequestCommit]);
+        });
+
+        it("finds the tag anchor from the full unfiltered history before filtering unreleased commits", async () => {
+            // The tagged commit belongs to component "b", not "a" — but "a"'s own tag must still be found
+            // correctly against the unfiltered stream, and only "a"'s commits should end up unreleased.
+            vi.spyOn(github, "tagIterator").mockImplementation(async function* (): AsyncGenerator<Tag> {
+                yield { sha: componentBCommit.sha, name: "a-v0.1.0", committedDate: "" };
+            });
+            vi.spyOn(github, "mergeCommitIterator").mockImplementation(async function* () {
+                yield componentACommit;
+                yield componentBCommit;
+            });
+
+            const result = await determineReleaseContext(github, "main", "a-", "a", ["a", "b"]);
+            expect(result.previousRelease).toEqual(Version.parse("0.1.0"));
+            expect(result.unreleasedCommits).toEqual([componentACommit]);
+        });
+    });
+
     describe("with a previous release tag not on the default branch", () => {
         it("returns an unreleased version and all commits", async () => {
             vi.spyOn(github, "tagIterator").mockImplementation(async function* (): AsyncGenerator<Tag> {
@@ -94,7 +142,7 @@ function createCommit(message: string): Commit {
     };
 }
 
-function createMergeCommit(pullRequestNumber: number, message: string): Commit {
+function createMergeCommit(pullRequestNumber: number, message: string, changedFilePaths?: string[]): Commit {
     const commit = createCommit(message);
     return {
         ...commit,
@@ -109,6 +157,7 @@ function createMergeCommit(pullRequestNumber: number, message: string): Commit {
             baseBranchName: "",
             mergeCommitOid: "",
             labels: [],
+            changedFilePaths,
         }
     }
 }

@@ -15,17 +15,27 @@ import { SemanticVersioningStrategy } from "./versioningStrategies/semantic";
 
 export class Manifest {
     // `componentName` is "" for the root component (single-project, backward-compatible naming — see
-    // componentNaming.ts). Non-root components namespace their tags/branch/labels by this name.
+    // componentNaming.ts). `componentPath`/`allComponentPaths` scope which commits are considered "unreleased"
+    // for this component (see componentPathFilter.ts); defaulting to "" / [""] preserves single-project
+    // behaviour (every commit is attributed to the root component).
     private constructor(
         private readonly github: Github,
         private readonly repository: Repository,
         private readonly targetBranch: string,
         private readonly componentName: string = "",
+        private readonly componentPath: string = "",
+        private readonly allComponentPaths: readonly string[] = [""],
     ) {}
 
     async prepare(releaseType: string) {
         logger.info(`Prepare release for repository '${this.repository.owner}/${this.repository.repo}'`);
-        const releaseContext = await determineReleaseContext(this.github, this.targetBranch, tagPrefix(this.componentName));
+        const releaseContext = await determineReleaseContext(
+            this.github,
+            this.targetBranch,
+            tagPrefix(this.componentName),
+            this.componentPath,
+            this.allComponentPaths,
+        );
 
         if (releaseContext.unreleasedCommits.length === 0) {
             logger.info(`No unreleased commits, nothing to do 🕸️`);
@@ -143,9 +153,17 @@ export class Manifest {
 
     // Builds a Manifest for a single component, reusing an already-configured Github client, repository and
     // target branch. Used by ManifestRunner so that resolving the repository/branch/wasm init happens once per
-    // run, regardless of how many components it processes. `componentName` defaults to "" (root component).
-    static forComponent(github: Github, repository: Repository, targetBranch: string, componentName: string = ""): Manifest {
-        return new Manifest(github, repository, targetBranch, componentName);
+    // run, regardless of how many components it processes. `componentName`/`componentPath` default to "" and
+    // `allComponentPaths` to [""] (root component, single-project behaviour).
+    static forComponent(
+        github: Github,
+        repository: Repository,
+        targetBranch: string,
+        componentName: string = "",
+        componentPath: string = "",
+        allComponentPaths: readonly string[] = [""],
+    ): Manifest {
+        return new Manifest(github, repository, targetBranch, componentName, componentPath, allComponentPaths);
     }
 }
 
