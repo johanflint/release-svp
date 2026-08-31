@@ -126,4 +126,119 @@ describe("parseManifestConfig", () => {
             ]);
         }
     });
+
+    describe("migration", () => {
+        const baseComponents = [
+            { path: "a", component: "project-a", releaseType: "rust" },
+            { path: "b", component: "project-b", releaseType: "rust" },
+        ];
+
+        it("parses a valid migration config with a legacy successor and bootstrap versions", () => {
+            const config = parseManifestConfig(JSON.stringify({
+                components: baseComponents,
+                migration: {
+                    cutoverCommit: "abcdef0123456789abcdef0123456789abcdef01",
+                    legacyRootSuccessor: "project-a",
+                    legacyAnchorTag: "v1.4.0",
+                    bootstrapVersions: { "project-b": "0.1.0" },
+                },
+            }));
+
+            expect(config.migration).toEqual({
+                cutoverCommit: "abcdef0123456789abcdef0123456789abcdef01",
+                legacyRootSuccessor: "project-a",
+                legacyAnchorTag: "v1.4.0",
+                bootstrapVersions: { "project-b": "0.1.0" },
+            });
+        });
+
+        it("parses a valid migration config without a legacy successor (bootstrapping every component)", () => {
+            const config = parseManifestConfig(JSON.stringify({
+                components: baseComponents,
+                migration: {
+                    cutoverCommit: "abcdef0123456789abcdef0123456789abcdef01",
+                    bootstrapVersions: { "project-a": "0.1.0", "project-b": "0.1.0" },
+                },
+            }));
+
+            expect(config.migration?.legacyRootSuccessor).toBeUndefined();
+            expect(config.migration?.legacyAnchorTag).toBeUndefined();
+        });
+
+        it("throws when 'cutoverCommit' is missing or not a valid SHA", () => {
+            expect(() => parseManifestConfig(JSON.stringify({
+                components: baseComponents,
+                migration: { bootstrapVersions: { "project-a": "0.1.0", "project-b": "0.1.0" } },
+            }))).toThrow(/'migration\.cutoverCommit' must be a full commit SHA/);
+
+            expect(() => parseManifestConfig(JSON.stringify({
+                components: baseComponents,
+                migration: { cutoverCommit: "not-a-sha", bootstrapVersions: { "project-a": "0.1.0", "project-b": "0.1.0" } },
+            }))).toThrow(/'migration\.cutoverCommit' must be a full commit SHA/);
+        });
+
+        it("throws when 'cutoverCommit' is an abbreviated SHA", () => {
+            // Abbreviated SHAs must be rejected: `truncateAtCutover` compares this value verbatim against full
+            // commit OIDs from the GitHub API, so an abbreviation would never match and would silently defeat
+            // the cutover truncation (see manifestConfig.ts COMMIT_SHA_PATTERN comment).
+            expect(() => parseManifestConfig(JSON.stringify({
+                components: baseComponents,
+                migration: { cutoverCommit: "abc1234", bootstrapVersions: { "project-a": "0.1.0", "project-b": "0.1.0" } },
+            }))).toThrow(/'migration\.cutoverCommit' must be a full commit SHA \(40 hex characters\), not an abbreviation/);
+        });
+
+        it("throws when 'legacyRootSuccessor' does not reference a configured component", () => {
+            expect(() => parseManifestConfig(JSON.stringify({
+                components: baseComponents,
+                migration: { cutoverCommit: "abcdef0123456789abcdef0123456789abcdef01", legacyRootSuccessor: "unknown", legacyAnchorTag: "v1.0.0" },
+            }))).toThrow(/'migration\.legacyRootSuccessor' must reference a configured component \(got 'unknown'\)/);
+        });
+
+        it("throws when 'legacyRootSuccessor' is set without a 'legacyAnchorTag'", () => {
+            expect(() => parseManifestConfig(JSON.stringify({
+                components: baseComponents,
+                migration: { cutoverCommit: "abcdef0123456789abcdef0123456789abcdef01", legacyRootSuccessor: "project-a", bootstrapVersions: { "project-b": "0.1.0" } },
+            }))).toThrow(/'migration\.legacyAnchorTag' is required.*when 'legacyRootSuccessor' is set/);
+        });
+
+        it("throws when 'legacyAnchorTag' is set without a 'legacyRootSuccessor'", () => {
+            expect(() => parseManifestConfig(JSON.stringify({
+                components: baseComponents,
+                migration: { cutoverCommit: "abcdef0123456789abcdef0123456789abcdef01", legacyAnchorTag: "v1.0.0", bootstrapVersions: { "project-a": "0.1.0", "project-b": "0.1.0" } },
+            }))).toThrow(/'migration\.legacyAnchorTag' is only meaningful together with 'legacyRootSuccessor'/);
+        });
+
+        it("throws when a bootstrapVersions entry references an unknown component", () => {
+            expect(() => parseManifestConfig(JSON.stringify({
+                components: baseComponents,
+                migration: { cutoverCommit: "abcdef0123456789abcdef0123456789abcdef01", bootstrapVersions: { "project-a": "0.1.0", "project-b": "0.1.0", unknown: "0.1.0" } },
+            }))).toThrow(/'migration\.bootstrapVersions': 'unknown' is not a configured component/);
+        });
+
+        it("throws when a bootstrapVersions entry is for the legacy successor", () => {
+            expect(() => parseManifestConfig(JSON.stringify({
+                components: baseComponents,
+                migration: {
+                    cutoverCommit: "abcdef0123456789abcdef0123456789abcdef01",
+                    legacyRootSuccessor: "project-a",
+                    legacyAnchorTag: "v1.0.0",
+                    bootstrapVersions: { "project-a": "0.1.0", "project-b": "0.1.0" },
+                },
+            }))).toThrow(/'project-a' is the legacy root successor and inherits its baseline from 'legacyAnchorTag'/);
+        });
+
+        it("throws when a bootstrapVersions value is not a valid version string", () => {
+            expect(() => parseManifestConfig(JSON.stringify({
+                components: baseComponents,
+                migration: { cutoverCommit: "abcdef0123456789abcdef0123456789abcdef01", bootstrapVersions: { "project-a": "not-a-version", "project-b": "0.1.0" } },
+            }))).toThrow(/'migration\.bootstrapVersions\.project-a' must be a semantic version string/);
+        });
+
+        it("throws when a non-successor component has no bootstrap version", () => {
+            expect(() => parseManifestConfig(JSON.stringify({
+                components: baseComponents,
+                migration: { cutoverCommit: "abcdef0123456789abcdef0123456789abcdef01", bootstrapVersions: { "project-a": "0.1.0" } },
+            }))).toThrow(/'migration\.bootstrapVersions' is missing a starting version for component 'project-b'/);
+        });
+    });
 });

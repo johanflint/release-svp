@@ -1,10 +1,12 @@
 import { FileNotFoundError } from "@google-automations/git-file-utils";
 import init from "@rainbowatcher/toml-edit-js";
+import { MigrationOptions } from "./determineReleaseContext";
 import { Github } from "./github";
 import { logger, Logger, logger as defaultLogger } from "./logger";
 import { Manifest } from "./manifest";
-import { ComponentConfig, ManifestConfigError, parseManifestConfig, ResolvedManifestConfig } from "./manifestConfig";
+import { ComponentConfig, ManifestConfigError, MigrationConfig, parseManifestConfig, ResolvedManifestConfig } from "./manifestConfig";
 import { Repository } from "./repository";
+import { Version } from "./version";
 
 const CONFIG_PATH = "release-svp-config.json";
 
@@ -20,6 +22,7 @@ export class ManifestRunner {
         private readonly repository: Repository,
         private readonly targetBranch: string,
         private readonly components: readonly ComponentConfig[],
+        private readonly migration?: MigrationConfig,
     ) {}
 
     async prepare(): Promise<void> {
@@ -28,7 +31,7 @@ export class ManifestRunner {
             const label = componentLabel(component);
             logger.info(`--- Preparing release for component '${label}' ---`);
             try {
-                await Manifest.forComponent(this.github, this.repository, this.targetBranch, component.component, component.path, allComponentPaths)
+                await Manifest.forComponent(this.github, this.repository, this.targetBranch, component.component, component.path, allComponentPaths, migrationOptionsFor(component, this.migration))
                     .prepare(component.releaseType);
             } catch (e) {
                 logger.error(`Failed to prepare release for component '${label}'`, e);
@@ -42,7 +45,7 @@ export class ManifestRunner {
             const label = componentLabel(component);
             logger.info(`--- Creating release(s) for component '${label}' ---`);
             try {
-                await Manifest.forComponent(this.github, this.repository, this.targetBranch, component.component, component.path, allComponentPaths)
+                await Manifest.forComponent(this.github, this.repository, this.targetBranch, component.component, component.path, allComponentPaths, migrationOptionsFor(component, this.migration))
                     .release();
             } catch (e) {
                 logger.error(`Failed to create release(s) for component '${label}'`, e);
@@ -71,7 +74,7 @@ export class ManifestRunner {
             return null;
         }
 
-        return new ManifestRunner(github, repository, resolved.targetBranch, resolved.components);
+        return new ManifestRunner(github, repository, resolved.targetBranch, resolved.components, resolved.migration);
     }
 
     private static async resolveComponents(
@@ -118,6 +121,28 @@ export class ManifestRunner {
 
 function componentLabel(component: ComponentConfig): string {
     return component.component || "<root>";
+}
+
+// Translates the (path-agnostic) migration config into the per-component MigrationOptions determineReleaseContext
+// needs — see manifestConfig.ts (`MigrationConfig`) and determineReleaseContext.ts (`MigrationOptions`).
+function migrationOptionsFor(component: ComponentConfig, migration: MigrationConfig | undefined): MigrationOptions | undefined {
+    if (!migration) {
+        return undefined;
+    }
+
+    if (component.component === migration.legacyRootSuccessor) {
+        return { cutoverCommit: migration.cutoverCommit, legacyAnchorTagName: migration.legacyAnchorTag };
+    }
+
+    const bootstrapVersionString = migration.bootstrapVersions?.[component.component];
+    if (bootstrapVersionString) {
+        return { cutoverCommit: migration.cutoverCommit, bootstrapVersion: Version.parse(bootstrapVersionString) };
+    }
+
+    // Config validation (see manifestConfig.ts) requires every non-successor component to have a bootstrap
+    // version, so this should be unreachable — still, truncate at cutover defensively rather than silently
+    // falling back to un-truncated (pre-migration-inclusive) history.
+    return { cutoverCommit: migration.cutoverCommit };
 }
 
 function parseGitHubUrl(url: string): Repository {

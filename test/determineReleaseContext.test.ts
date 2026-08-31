@@ -132,6 +132,88 @@ describe("determineReleaseContext", () => {
             expect(result.unreleasedCommits).toEqual([featureCommit, initialCommit]);
         });
     })
+
+    describe("with a migration in progress", () => {
+        const cutoverCommit = createMergeCommit(4, "Add release-svp-config.json", ["release-svp-config.json"]);
+        const legacyCommit = createCommit("Old, pre-migration commit");
+        const postCutoverACommit = createMergeCommit(5, "Add a-feature after migration", ["a/lib.rs"]);
+        const postCutoverBCommit = createMergeCommit(6, "Add b-feature after migration", ["b/lib.rs"]);
+
+        it("falls back to the legacy anchor tag when the component has no scoped tag of its own yet", async () => {
+            vi.spyOn(github, "tagIterator").mockImplementation(async function* (): AsyncGenerator<Tag> {
+                // No "a-"-prefixed tag exists yet — only the pre-migration, unscoped tag.
+                yield { sha: legacyCommit.sha, name: "v1.4.0", committedDate: "" };
+            });
+            vi.spyOn(github, "mergeCommitIterator").mockImplementation(async function* () {
+                yield postCutoverACommit;
+                yield cutoverCommit;
+                yield legacyCommit;
+            });
+
+            const result = await determineReleaseContext(github, "main", "a-", "a", ["a", "b"], {
+                cutoverCommit: cutoverCommit.sha,
+                legacyAnchorTagName: "v1.4.0",
+            });
+
+            expect(result.previousRelease).toEqual(Version.parse("1.4.0"));
+            // The cutover commit itself (and anything at/before it) is excluded, even though it's "after" the
+            // legacy anchor tag — it predates the component concept entirely.
+            expect(result.unreleasedCommits).toEqual([postCutoverACommit]);
+        });
+
+        it("prefers a component's own scoped tag over the legacy anchor tag once one exists, without spuriously warning about the (now out-of-range) cutover commit", async () => {
+            vi.spyOn(logger, "warn");
+            vi.spyOn(github, "tagIterator").mockImplementation(async function* (): AsyncGenerator<Tag> {
+                yield { sha: postCutoverACommit.sha, name: "a-v1.5.0", committedDate: "" };
+                yield { sha: legacyCommit.sha, name: "v1.4.0", committedDate: "" };
+            });
+            vi.spyOn(github, "mergeCommitIterator").mockImplementation(async function* () {
+                yield postCutoverACommit;
+                yield cutoverCommit;
+                yield legacyCommit;
+            });
+
+            const result = await determineReleaseContext(github, "main", "a-", "a", ["a", "b"], {
+                cutoverCommit: cutoverCommit.sha,
+                legacyAnchorTagName: "v1.4.0",
+            });
+
+            expect(result.previousRelease).toEqual(Version.parse("1.5.0"));
+            expect(result.unreleasedCommits).toEqual([]);
+            expect(logger.warn).not.toHaveBeenCalled();
+        });
+
+        it("uses the bootstrap version and truncates at the cutover commit for a component with no legacy history", async () => {
+            vi.spyOn(github, "tagIterator").mockImplementation(async function* (): AsyncGenerator<Tag> {});
+            vi.spyOn(github, "mergeCommitIterator").mockImplementation(async function* () {
+                yield postCutoverBCommit;
+                yield cutoverCommit;
+                yield legacyCommit;
+            });
+
+            const result = await determineReleaseContext(github, "main", "b-", "b", ["a", "b"], {
+                cutoverCommit: cutoverCommit.sha,
+                bootstrapVersion: Version.parse("0.1.0"),
+            });
+
+            expect(result.previousRelease).toEqual(Version.parse("0.1.0"));
+            expect(result.unreleasedCommits).toEqual([postCutoverBCommit]);
+        });
+
+        it("throws MigrationCutoverNotFoundError when the cutover commit isn't found in recent history", async () => {
+            vi.spyOn(github, "tagIterator").mockImplementation(async function* (): AsyncGenerator<Tag> {});
+            vi.spyOn(github, "mergeCommitIterator").mockImplementation(async function* () {
+                yield postCutoverBCommit;
+            });
+
+            await expect(determineReleaseContext(github, "main", "b-", "b", ["a", "b"], {
+                cutoverCommit: "does-not-exist",
+                bootstrapVersion: Version.parse("0.1.0"),
+            })).rejects.toThrow(
+                "Migration cutover commit 'does-not-exist' not found in recent commits, refusing to release without it (check 'migration.cutoverCommit' in release-svp-config.json)",
+            );
+        });
+    });
 });
 
 function createCommit(message: string): Commit {

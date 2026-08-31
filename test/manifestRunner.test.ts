@@ -4,6 +4,7 @@ import { Github } from "../src/github";
 import { logger } from "../src/logger";
 import { Manifest } from "../src/manifest";
 import { ManifestRunner } from "../src/manifestRunner";
+import { Version } from "../src/version";
 
 vi.mock("@rainbowatcher/toml-edit-js", () => ({
     default: vi.fn(),
@@ -136,7 +137,47 @@ describe("ManifestRunner", () => {
 
                 await result!.prepare();
 
-                expect(Manifest.forComponent).toHaveBeenCalledWith(expect.anything(), expect.anything(), "trunk", "project-b", "b", ["b"]);
+                expect(Manifest.forComponent).toHaveBeenCalledWith(expect.anything(), expect.anything(), "trunk", "project-b", "b", ["b"], undefined);
+            });
+
+            it("computes migration options per component from the config's 'migration' block", async () => {
+                createGithubMock({
+                    retrieveDefaultBranch: vi.fn().mockResolvedValue("main"),
+                    retrieveFileContents: vi.fn().mockResolvedValue({
+                        parsedContent: JSON.stringify({
+                            components: [
+                                { path: "a", component: "project-a", releaseType: "rust" },
+                                { path: "b", component: "project-b", releaseType: "rust" },
+                            ],
+                            migration: {
+                                cutoverCommit: "abcdef0123456789abcdef0123456789abcdef01",
+                                legacyRootSuccessor: "project-a",
+                                legacyAnchorTag: "v1.4.0",
+                                bootstrapVersions: { "project-b": "0.1.0" },
+                            },
+                        }),
+                    }),
+                });
+
+                const result = await ManifestRunner.create("owner/repo", token, undefined, logger);
+                expect(result).not.toBeNull();
+
+                vi.mocked(Manifest.forComponent).mockReturnValue({
+                    prepare: vi.fn().mockResolvedValue(undefined),
+                } as unknown as Manifest);
+
+                await result!.prepare();
+
+                // "project-a" is the declared legacy successor: cutoverCommit + legacyAnchorTagName, no bootstrapVersion.
+                expect(Manifest.forComponent).toHaveBeenCalledWith(
+                    expect.anything(), expect.anything(), "main", "project-a", "a", ["a", "b"],
+                    { cutoverCommit: "abcdef0123456789abcdef0123456789abcdef01", legacyAnchorTagName: "v1.4.0" },
+                );
+                // "project-b" has no legacy history: cutoverCommit + its declared bootstrapVersion.
+                expect(Manifest.forComponent).toHaveBeenCalledWith(
+                    expect.anything(), expect.anything(), "main", "project-b", "b", ["a", "b"],
+                    { cutoverCommit: "abcdef0123456789abcdef0123456789abcdef01", bootstrapVersion: Version.parse("0.1.0") },
+                );
             });
         });
     });

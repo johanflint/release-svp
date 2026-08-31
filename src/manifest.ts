@@ -2,7 +2,7 @@ import init from "@rainbowatcher/toml-edit-js";
 import { buildChangelog } from "./changelogBuilder";
 import { PullRequest } from "./commit";
 import { pendingLabel, releaseBranchName, taggedLabel, tagPrefix } from "./componentNaming";
-import { determineReleaseContext } from "./determineReleaseContext";
+import { determineReleaseContext, MigrationOptions } from "./determineReleaseContext";
 import { determineReleases } from "./determineReleases";
 import { DuplicateReleaseError, Github } from "./github";
 import { logger, Logger, logger as defaultLogger } from "./logger";
@@ -17,7 +17,8 @@ export class Manifest {
     // `componentName` is "" for the root component (single-project, backward-compatible naming — see
     // componentNaming.ts). `componentPath`/`allComponentPaths` scope which commits are considered "unreleased"
     // for this component (see componentPathFilter.ts); defaulting to "" / [""] preserves single-project
-    // behaviour (every commit is attributed to the root component).
+    // behaviour (every commit is attributed to the root component). `migration` is only present while a
+    // repository is migrating from single-project to multi-component mode — see manifestConfig.ts and README.md.
     private constructor(
         private readonly github: Github,
         private readonly repository: Repository,
@@ -25,6 +26,7 @@ export class Manifest {
         private readonly componentName: string = "",
         private readonly componentPath: string = "",
         private readonly allComponentPaths: readonly string[] = [""],
+        private readonly migration?: MigrationOptions,
     ) {}
 
     async prepare(releaseType: string) {
@@ -35,6 +37,7 @@ export class Manifest {
             tagPrefix(this.componentName),
             this.componentPath,
             this.allComponentPaths,
+            this.migration,
         );
 
         if (releaseContext.unreleasedCommits.length === 0) {
@@ -154,7 +157,8 @@ export class Manifest {
     // Builds a Manifest for a single component, reusing an already-configured Github client, repository and
     // target branch. Used by ManifestRunner so that resolving the repository/branch/wasm init happens once per
     // run, regardless of how many components it processes. `componentName`/`componentPath` default to "" and
-    // `allComponentPaths` to [""] (root component, single-project behaviour).
+    // `allComponentPaths` to [""] (root component, single-project behaviour). `migration` is only passed while
+    // a repository is migrating from single-project to multi-component mode.
     static forComponent(
         github: Github,
         repository: Repository,
@@ -162,8 +166,9 @@ export class Manifest {
         componentName: string = "",
         componentPath: string = "",
         allComponentPaths: readonly string[] = [""],
+        migration?: MigrationOptions,
     ): Manifest {
-        return new Manifest(github, repository, targetBranch, componentName, componentPath, allComponentPaths);
+        return new Manifest(github, repository, targetBranch, componentName, componentPath, allComponentPaths, migration);
     }
 }
 
