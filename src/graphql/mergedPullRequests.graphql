@@ -15,6 +15,14 @@ query mergedPullRequests($owner: String!, $repo: String!, $count: Int!, $targetB
                 mergeCommit {
                     oid
                 }
+                files(first: 100) {
+                    nodes {
+                        path
+                    }
+                    pageInfo {
+                        hasNextPage
+                    }
+                }
             }
             pageInfo {
                 endCursor

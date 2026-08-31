@@ -115,6 +115,7 @@ export class Github {
                 baseBranchName: associatedPullRequest.baseRefName,
                 mergeCommitOid: associatedPullRequest.mergeCommit?.oid,
                 labels: associatedPullRequest.labels.nodes.map(node => node.name),
+                ...this.extractChangedFilePaths(associatedPullRequest, associatedPullRequest.number),
             } : undefined;
 
             return {
@@ -261,9 +262,27 @@ export class Github {
                     baseBranchName: pullRequest.baseRefName,
                     mergeCommitOid: pullRequest.mergeCommit?.oid,
                     labels: (pullRequest.labels?.nodes || []).map(l => l.name),
+                    ...this.extractChangedFilePaths(pullRequest, pullRequest.number),
                 };
             }),
         };
+    }
+
+    // Extracts the changed file paths for a pull request from its GraphQL `files` connection, warning (once per
+    // pull request) if the result was truncated by the page size — callers must then treat "no path matched" as
+    // inconclusive rather than a confident non-match.
+    private extractChangedFilePaths(pullRequest: GraphQLPullRequest, pullRequestNumber: number): Pick<PullRequest, "changedFilePaths" | "changedFilePathsTruncated"> {
+        if (!pullRequest.files) {
+            return {};
+        }
+
+        const changedFilePaths = pullRequest.files.nodes.map(node => node.path);
+        const changedFilePathsTruncated = pullRequest.files.pageInfo.hasNextPage;
+        if (changedFilePathsTruncated) {
+            this.logger.warn(`Pull request #${pullRequestNumber} has more than ${changedFilePaths.length} changed files, path-based component filtering may be incomplete`);
+        }
+
+        return { changedFilePaths, changedFilePathsTruncated };
     }
 
     async retrieveFileContents(path: string, branch: string): Promise<GitHubFileContents> {
