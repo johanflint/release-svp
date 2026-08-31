@@ -140,6 +140,87 @@ describe("ManifestRunner", () => {
                 expect(Manifest.forComponent).toHaveBeenCalledWith(expect.anything(), expect.anything(), "trunk", "project-b", "b", ["b"], undefined);
             });
 
+            it("re-reads the config from the target branch when it differs from the default branch", async () => {
+                const retrieveFileContents = vi.fn()
+                    .mockResolvedValueOnce({
+                        parsedContent: JSON.stringify({
+                            targetBranch: "trunk",
+                            components: [{ path: "a", component: "project-a", releaseType: "rust" }],
+                        }),
+                    })
+                    .mockResolvedValueOnce({
+                        // The config on "trunk" is authoritative for the actual release run, and may differ.
+                        parsedContent: JSON.stringify({
+                            components: [{ path: "b", component: "project-b", releaseType: "rust" }],
+                        }),
+                    });
+                createGithubMock({ retrieveDefaultBranch: vi.fn().mockResolvedValue("main"), retrieveFileContents });
+
+                const result = await ManifestRunner.create("owner/repo", token, undefined, logger);
+                expect(result).not.toBeNull();
+
+                vi.mocked(Manifest.forComponent).mockReturnValue({ prepare: vi.fn().mockResolvedValue(undefined) } as unknown as Manifest);
+
+                await result!.prepare();
+
+                expect(retrieveFileContents).toHaveBeenNthCalledWith(1, "release-svp-config.json", "main");
+                expect(retrieveFileContents).toHaveBeenNthCalledWith(2, "release-svp-config.json", "trunk");
+                expect(Manifest.forComponent).toHaveBeenCalledWith(expect.anything(), expect.anything(), "trunk", "project-b", "b", ["b"], undefined);
+            });
+
+            it("falls back to the default branch's config when the target branch has none", async () => {
+                const retrieveFileContents = vi.fn()
+                    .mockResolvedValueOnce({
+                        parsedContent: JSON.stringify({
+                            targetBranch: "trunk",
+                            components: [{ path: "a", component: "project-a", releaseType: "rust" }],
+                        }),
+                    })
+                    .mockRejectedValueOnce(new FileNotFoundError("release-svp-config.json"));
+                createGithubMock({ retrieveDefaultBranch: vi.fn().mockResolvedValue("main"), retrieveFileContents });
+
+                const result = await ManifestRunner.create("owner/repo", token, undefined, logger);
+                expect(result).not.toBeNull();
+
+                vi.mocked(Manifest.forComponent).mockReturnValue({ prepare: vi.fn().mockResolvedValue(undefined) } as unknown as Manifest);
+                vi.spyOn(logger, "warn");
+
+                await result!.prepare();
+
+                expect(logger.warn).toHaveBeenCalledWith("'release-svp-config.json' not found on target branch 'trunk', falling back to the copy on default branch 'main'");
+                expect(Manifest.forComponent).toHaveBeenCalledWith(expect.anything(), expect.anything(), "trunk", "project-a", "a", ["a"], undefined);
+            });
+
+            it("warns and ignores a nested targetBranch declared by the target branch's own config", async () => {
+                const retrieveFileContents = vi.fn()
+                    .mockResolvedValueOnce({
+                        parsedContent: JSON.stringify({
+                            targetBranch: "trunk",
+                            components: [{ path: "a", component: "project-a", releaseType: "rust" }],
+                        }),
+                    })
+                    .mockResolvedValueOnce({
+                        parsedContent: JSON.stringify({
+                            targetBranch: "another-branch",
+                            components: [{ path: "b", component: "project-b", releaseType: "rust" }],
+                        }),
+                    });
+                createGithubMock({ retrieveDefaultBranch: vi.fn().mockResolvedValue("main"), retrieveFileContents });
+
+                const result = await ManifestRunner.create("owner/repo", token, undefined, logger);
+                expect(result).not.toBeNull();
+
+                vi.mocked(Manifest.forComponent).mockReturnValue({ prepare: vi.fn().mockResolvedValue(undefined) } as unknown as Manifest);
+                vi.spyOn(logger, "warn");
+
+                await result!.prepare();
+
+                expect(logger.warn).toHaveBeenCalledWith(
+                    "'release-svp-config.json' on target branch 'trunk' declares a different 'targetBranch' ('another-branch'), ignoring it to avoid a redirect loop",
+                );
+                expect(Manifest.forComponent).toHaveBeenCalledWith(expect.anything(), expect.anything(), "trunk", "project-b", "b", ["b"], undefined);
+            });
+
             it("computes migration options per component from the config's 'migration' block", async () => {
                 createGithubMock({
                     retrieveDefaultBranch: vi.fn().mockResolvedValue("main"),

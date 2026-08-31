@@ -16,6 +16,18 @@ function rootComponent(releaseType: string): ComponentConfig {
     return { path: "", component: "", releaseType };
 }
 
+async function fetchConfig(github: Github, branch: string): Promise<string | undefined> {
+    try {
+        const file = await github.retrieveFileContents(CONFIG_PATH, branch);
+        return file.parsedContent;
+    } catch (e) {
+        if (e instanceof FileNotFoundError) {
+            return undefined;
+        }
+        throw e;
+    }
+}
+
 export class ManifestRunner {
     private constructor(
         private readonly github: Github,
@@ -93,15 +105,7 @@ export class ManifestRunner {
         cliReleaseType: string | undefined,
         logger: Logger,
     ): Promise<ResolvedManifestConfig | undefined> {
-        let configContent: string | undefined;
-        try {
-            const file = await github.retrieveFileContents(CONFIG_PATH, defaultBranch);
-            configContent = file.parsedContent;
-        } catch (e) {
-            if (!(e instanceof FileNotFoundError)) {
-                throw e;
-            }
-        }
+        const configContent = await fetchConfig(github, defaultBranch);
 
         if (configContent === undefined) {
             if (!cliReleaseType) {
@@ -118,7 +122,27 @@ export class ManifestRunner {
 
         try {
             const config = parseManifestConfig(configContent);
-            return { ...config, targetBranch: config.targetBranch ?? defaultBranch };
+            const targetBranch = config.targetBranch ?? defaultBranch;
+
+            // The default branch's config only tells us *which* branch to target; the actual releases are
+            // created against `targetBranch`, so that's the config that should govern them — it may declare a
+            // different set of components (or not exist at all) compared to the default branch's copy.
+            if (targetBranch === defaultBranch) {
+                return { ...config, targetBranch };
+            }
+
+            const targetConfigContent = await fetchConfig(github, targetBranch);
+            if (targetConfigContent === undefined) {
+                logger.warn(`'${CONFIG_PATH}' not found on target branch '${targetBranch}', falling back to the copy on default branch '${defaultBranch}'`);
+                return { ...config, targetBranch };
+            }
+
+            const targetConfig = parseManifestConfig(targetConfigContent);
+            if (targetConfig.targetBranch && targetConfig.targetBranch !== targetBranch) {
+                logger.warn(`'${CONFIG_PATH}' on target branch '${targetBranch}' declares a different 'targetBranch' ('${targetConfig.targetBranch}'), ignoring it to avoid a redirect loop`);
+            }
+
+            return { ...targetConfig, targetBranch };
         } catch (e) {
             if (e instanceof ManifestConfigError) {
                 logger.error(e.message);
