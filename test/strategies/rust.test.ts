@@ -75,4 +75,36 @@ describe("RustStrategy", () => {
         const versionsMap = new Map([["my-package", updateOptions.releaseVersion]]);
         expect(CargoLock).toHaveBeenCalledWith(versionsMap);
     });
+
+    describe("with a component path", () => {
+        const componentStrategy = new RustStrategy({ github, componentPath: "a" });
+
+        it("prefixes the changelog path", async () => {
+            const updates = await componentStrategy.determineUpdates(updateOptions);
+            expect(updates).toContainEqual({
+                path: "a/CHANGELOG.md",
+                createIfMissing: true,
+                updater: expect.any(ChangelogUpdater),
+            });
+        });
+
+        it("prefixes the Cargo.toml path and reads it from that location", async () => {
+            const updates = await componentStrategy.determineUpdates(updateOptions);
+            expect(updates).toContainEqual({
+                path: "a/Cargo.toml",
+                createIfMissing: false,
+                updater: expect.any(CargoToml),
+            });
+            expect(github.retrieveFileContents).toHaveBeenCalledWith("a/Cargo.toml", updateOptions.targetBranch);
+        });
+
+        it("prefixes the Cargo.lock path", async () => {
+            const updates = await componentStrategy.determineUpdates(updateOptions);
+            expect(updates).toContainEqual({
+                path: "a/Cargo.lock",
+                createIfMissing: false,
+                updater: expect.any(CargoLock),
+            });
+        });
+    });
 });

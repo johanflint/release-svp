@@ -54,7 +54,7 @@ export class Manifest {
         logger.info(changelog);
         logger.info("---");
 
-        const strategy = buildStrategy(releaseType, { github: this.github });
+        const strategy = buildStrategy(releaseType, { github: this.github, componentPath: this.componentPath });
         const updateOptions: UpdateOptions = {
             changelogEntry: changelog,
             releaseVersion,

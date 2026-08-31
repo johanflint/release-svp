@@ -14,17 +14,21 @@ export class RustStrategy implements Strategy {
     constructor(readonly config: StrategyConfiguration) {}
 
     async determineUpdates(options: UpdateOptions): Promise<Update[]> {
+        const changelogPath = this.prefixed(CHANGELOG_PATH);
+        const cargoPath = this.prefixed(CARGO_PATH);
+        const lockPath = this.prefixed(LOCK_PATH);
+
         const updates: Update[] = [{
-            path: CHANGELOG_PATH,
+            path: changelogPath,
             createIfMissing: true,
             updater: new ChangelogUpdater(options.changelogEntry),
         }, {
-            path: CARGO_PATH,
+            path: cargoPath,
             createIfMissing: false,
-            updater: new CargoToml(options.releaseVersion, CARGO_PATH),
+            updater: new CargoToml(options.releaseVersion, cargoPath),
         }];
 
-        const tomlContent = await this.config.github.retrieveFileContents(CARGO_PATH, options.targetBranch);
+        const tomlContent = await this.config.github.retrieveFileContents(cargoPath, options.targetBranch);
         const parsedManifest = parse(tomlContent.parsedContent) as CargoManifest;
 
         const versionsMap: Map<string, Version> = new Map();
@@ -33,12 +37,19 @@ export class RustStrategy implements Strategy {
         }
 
         updates.push({
-            path: LOCK_PATH,
+            path: lockPath,
             createIfMissing: false,
             updater: new CargoLock(versionsMap),
         });
 
         return updates;
+    }
+
+    // Prefixes a root-relative file name with this strategy's component path, so a component at path "a" reads/
+    // writes "a/Cargo.toml" instead of the repo-root "Cargo.toml". The root component ("" / undefined) keeps
+    // today's unprefixed behaviour.
+    private prefixed(fileName: string): string {
+        return this.config.componentPath ? `${this.config.componentPath}/${fileName}` : fileName;
     }
 }
 
