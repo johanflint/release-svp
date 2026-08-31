@@ -27,7 +27,7 @@ export class ManifestRunner {
             const label = componentLabel(component);
             logger.info(`--- Preparing release for component '${label}' ---`);
             try {
-                await Manifest.forComponent(this.github, this.repository, this.targetBranch).prepare(component.releaseType);
+                await Manifest.forComponent(this.github, this.repository, this.targetBranch, component.component).prepare(component.releaseType);
             } catch (e) {
                 logger.error(`Failed to prepare release for component '${label}'`, e);
             }
@@ -39,7 +39,7 @@ export class ManifestRunner {
             const label = componentLabel(component);
             logger.info(`--- Creating release(s) for component '${label}' ---`);
             try {
-                await Manifest.forComponent(this.github, this.repository, this.targetBranch).release();
+                await Manifest.forComponent(this.github, this.repository, this.targetBranch, component.component).release();
             } catch (e) {
                 logger.error(`Failed to create release(s) for component '${label}'`, e);
             }

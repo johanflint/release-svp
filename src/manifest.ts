@@ -1,6 +1,7 @@
 import init from "@rainbowatcher/toml-edit-js";
 import { buildChangelog } from "./changelogBuilder";
 import { PullRequest } from "./commit";
+import { pendingLabel, releaseBranchName, taggedLabel, tagPrefix } from "./componentNaming";
 import { determineReleaseContext } from "./determineReleaseContext";
 import { determineReleases } from "./determineReleases";
 import { DuplicateReleaseError, Github } from "./github";
@@ -12,16 +13,19 @@ import { UpdateOptions } from "./strategy";
 import { buildStrategy } from "./strategyFactory";
 import { SemanticVersioningStrategy } from "./versioningStrategies/semantic";
 
-const LABEL_PENDING = "autorelease: pending";
-const LABEL_TAGGED = "autorelease: tagged";
-const RELEASE_BRANCH_PREFIX = "release-svp--branches-";
-
 export class Manifest {
-    private constructor(private readonly github: Github, private readonly repository: Repository, private readonly targetBranch: string) {}
+    // `componentName` is "" for the root component (single-project, backward-compatible naming — see
+    // componentNaming.ts). Non-root components namespace their tags/branch/labels by this name.
+    private constructor(
+        private readonly github: Github,
+        private readonly repository: Repository,
+        private readonly targetBranch: string,
+        private readonly componentName: string = "",
+    ) {}
 
     async prepare(releaseType: string) {
         logger.info(`Prepare release for repository '${this.repository.owner}/${this.repository.repo}'`);
-        const releaseContext = await determineReleaseContext(this.github, this.targetBranch);
+        const releaseContext = await determineReleaseContext(this.github, this.targetBranch, tagPrefix(this.componentName));
 
         if (releaseContext.unreleasedCommits.length === 0) {
             logger.info(`No unreleased commits, nothing to do 🕸️`);
@@ -53,9 +57,9 @@ export class Manifest {
             title: `Release v${releaseVersion}`,
             body: createPullRequestBody(changelog),
             permalink: "unused",
-            headBranchName: `${RELEASE_BRANCH_PREFIX}${this.targetBranch}`,
+            headBranchName: releaseBranchName(this.targetBranch, this.componentName),
             baseBranchName: this.targetBranch,
-            labels: [LABEL_PENDING],
+            labels: [pendingLabel(this.componentName)],
         }
 
         const existingPullRequest = await this.findExistingPullRequest(pullRequest, this.github);
@@ -77,7 +81,7 @@ export class Manifest {
     private async findExistingPullRequest(existingPullRequest: PullRequest, github: Github): Promise<PullRequest | undefined> {
         const openPullRequestsGenerator = github.pullRequestIterator(existingPullRequest.baseBranchName, "OPEN");
         for await (const pullRequest of openPullRequestsGenerator) {
-            if (existingPullRequest.headBranchName === pullRequest.headBranchName && pullRequest.labels.includes(LABEL_PENDING)) {
+            if (existingPullRequest.headBranchName === pullRequest.headBranchName && pullRequest.labels.includes(pendingLabel(this.componentName))) {
                 return pullRequest;
             }
         }
@@ -85,7 +89,11 @@ export class Manifest {
     }
 
     async release() {
-        const releases = await determineReleases(this.github, this.targetBranch, { releaseBranchPrefix: RELEASE_BRANCH_PREFIX, labelPending: LABEL_PENDING });
+        const releases = await determineReleases(this.github, this.targetBranch, {
+            releaseBranchName: releaseBranchName(this.targetBranch, this.componentName),
+            labelPending: pendingLabel(this.componentName),
+            tagPrefix: tagPrefix(this.componentName),
+        });
 
         if (releases.length === 0) {
             logger.info(`Nothing to release 🐼`);
@@ -102,10 +110,10 @@ export class Manifest {
                 const url = await this.github.commentOnIssue(comment, release.pullRequestNumber);
                 logger.info(`Commented on pull request #${release.pullRequestNumber} at ${url}`);
 
-                logger.info(`Updating labels, removing '${LABEL_PENDING}'...`);
-                await this.github.removePullRequestLabels([LABEL_PENDING], release.pullRequestNumber);
-                logger.info(`Updating labels, adding '${LABEL_TAGGED}'...`);
-                await this.github.addPullRequestLabels([LABEL_TAGGED], release.pullRequestNumber);
+                logger.info(`Updating labels, removing '${pendingLabel(this.componentName)}'...`);
+                await this.github.removePullRequestLabels([pendingLabel(this.componentName)], release.pullRequestNumber);
+                logger.info(`Updating labels, adding '${taggedLabel(this.componentName)}'...`);
+                await this.github.addPullRequestLabels([taggedLabel(this.componentName)], release.pullRequestNumber);
             } catch (e) {
                 if (e instanceof DuplicateReleaseError) {
                     logger.warn(`Duplicate release tag for ${e.tagName}`);
@@ -135,9 +143,9 @@ export class Manifest {
 
     // Builds a Manifest for a single component, reusing an already-configured Github client, repository and
     // target branch. Used by ManifestRunner so that resolving the repository/branch/wasm init happens once per
-    // run, regardless of how many components it processes.
-    static forComponent(github: Github, repository: Repository, targetBranch: string): Manifest {
-        return new Manifest(github, repository, targetBranch);
+    // run, regardless of how many components it processes. `componentName` defaults to "" (root component).
+    static forComponent(github: Github, repository: Repository, targetBranch: string, componentName: string = ""): Manifest {
+        return new Manifest(github, repository, targetBranch, componentName);
     }
 }
 

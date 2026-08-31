@@ -47,6 +47,26 @@ describe("determineReleaseContext", () => {
         });
     });
 
+    describe("with tags for multiple components", () => {
+        it("only considers tags matching the given component prefix", async () => {
+            vi.spyOn(github, "tagIterator").mockImplementation(async function* (): AsyncGenerator<Tag> {
+                // "web-v0.2.0" belongs to another component and is on top of the commit that "api" released;
+                // it must be ignored when resolving "api"'s previous release.
+                yield { sha: featureCommit.sha, name: "web-v0.2.0", committedDate: "" }
+                yield { sha: previousReleaseCommit.sha, name: "api-v0.1.0", committedDate: "" }
+            });
+            vi.spyOn(github, "mergeCommitIterator").mockImplementation(async function* () {
+                yield featureCommit;
+                yield previousReleaseCommit;
+                yield initialCommit;
+            });
+
+            const result = await determineReleaseContext(github, "main", "api-");
+            expect(result.previousRelease).toEqual(Version.parse("0.1.0"));
+            expect(result.unreleasedCommits).toEqual([featureCommit]);
+        });
+    });
+
     describe("with a previous release tag not on the default branch", () => {
         it("returns an unreleased version and all commits", async () => {
             vi.spyOn(github, "tagIterator").mockImplementation(async function* (): AsyncGenerator<Tag> {

@@ -10,7 +10,7 @@ export interface Release {
     readonly pullRequestNumber: number;
 }
 
-export function buildRelease(mergedPullRequest: PullRequest): Release | undefined {
+export function buildRelease(mergedPullRequest: PullRequest, tagPrefix: string = ""): Release | undefined {
     if (!mergedPullRequest.sha) {
         logger.warn(`Pull request #${mergedPullRequest.number}  has no SHA — not merged? Skipping.`);
         return;
@@ -23,7 +23,7 @@ export function buildRelease(mergedPullRequest: PullRequest): Release | undefine
 
     return {
         sha: mergedPullRequest.sha,
-        tag: `v${releaseInfo.version}`,
+        tag: `${tagPrefix}v${releaseInfo.version}`,
         notes: releaseInfo.notes,
         pullRequestNumber: mergedPullRequest.number,
     };

@@ -4,13 +4,16 @@ import { logger } from "./logger";
 import { parseVersionTag } from "./parseVersionTag";
 import { Version } from "./version";
 
-export async function determineReleaseContext(github: Github, targetBranch: string): Promise<ReleaseContext> {
+// `componentTagPrefix` scopes previous-release detection to a single component's tags (see parseVersionTag),
+// so a component's release history is anchored on its own tags rather than another component's. Defaults to
+// "" for the root component, keeping single-project repositories backward compatible.
+export async function determineReleaseContext(github: Github, targetBranch: string, componentTagPrefix: string = ""): Promise<ReleaseContext> {
     const commitShas = new Set<string>();
     const cachedCommits: Commit[] = [];
 
     const tagGenerator = github.tagIterator();
     for await (const tag of tagGenerator) {
-        const version = parseVersionTag(tag.name);
+        const version = parseVersionTag(tag.name, componentTagPrefix);
         if (!version) {
             continue;
         }
