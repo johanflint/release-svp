@@ -4,6 +4,7 @@ import { createPullRequest } from "code-suggester";
 import { Octokit, RequestError } from "octokit";
 import { RequestError as RequestErrorBody } from "@octokit/types";
 import { Commit, PullRequest } from "./commit";
+import { ConcurrencyLimit } from "./concurrencyLimit";
 import latestTagsQuery from "./graphql/latestTags.graphql";
 import mergedPullRequestsQuery from "./graphql/mergedPullRequests.graphql";
 import pullRequestFilesQuery from "./graphql/pullRequestFiles.graphql";
@@ -20,6 +21,14 @@ import { Update } from "./update";
 // files each covers pull requests with up to 5,000 changed files, comfortably more than any real-world PR.
 const MAX_ADDITIONAL_CHANGED_FILE_PAGES = 50;
 
+// Bounds how many pull requests' follow-up changed-file pagination (see fetchRemainingChangedFilePaths) can be
+// in flight at once. A page of commits/PRs is otherwise mapped fully concurrently (see mergeCommitsGraphQL /
+// pullRequestsGraphQL), which is fine for the common case (a PR's files fit on the first page, no extra
+// requests needed) but could otherwise let several oversized PRs in the same page each fire off a burst of
+// follow-up requests simultaneously, risking GitHub's secondary/abuse rate limiting. Deliberately small and
+// conservative — this path is already the rare case, so there's no performance reason to raise it.
+const MAX_CONCURRENT_CHANGED_FILE_PAGINATIONS = 2;
+
 // Thrown when a pull request's full changed-file list cannot be obtained (pagination exhausted the safety
 // limit, or a follow-up request failed/returned malformed pagination data). Callers must not guess component
 // ownership from a partial file list — see extractChangedFilePaths/fetchRemainingChangedFilePaths.
@@ -35,6 +44,8 @@ export class Github {
     private readonly octokit: Octokit;
     private readonly restOctokit: RestOctokit;
     private readonly fileCache: RepositoryFileCache;
+    // Shared across every call the instance makes (not per fetched page) — see MAX_CONCURRENT_CHANGED_FILE_PAGINATIONS.
+    private readonly changedFilesPaginationLimit = new ConcurrencyLimit(MAX_CONCURRENT_CHANGED_FILE_PAGINATIONS);
 
     constructor(repository: Repository, token: string, private readonly logger: Logger) {
         this.repository = repository;
@@ -301,11 +312,12 @@ export class Github {
             return { changedFilePaths: firstPagePaths };
         }
 
-        if (!pullRequest.files.pageInfo.endCursor) {
+        const firstCursor = pullRequest.files.pageInfo.endCursor;
+        if (!firstCursor) {
             throw new PullRequestFilesIncompleteError(`Pull request #${pullRequestNumber} has more changed files than fit on one page, but no pagination cursor was returned`);
         }
 
-        return this.fetchRemainingChangedFilePaths(pullRequestNumber, firstPagePaths, pullRequest.files.pageInfo.endCursor);
+        return this.changedFilesPaginationLimit.run(() => this.fetchRemainingChangedFilePaths(pullRequestNumber, firstPagePaths, firstCursor));
     }
 
     // Follows GraphQL cursor pagination to fetch every remaining page of a pull request's changed files, beyond
