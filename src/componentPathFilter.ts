@@ -25,15 +25,13 @@ export type PathFilterVerdict = "match" | "no-match" | "unknown";
 // the full set of configured component paths (needed so the root component correctly excludes files owned by
 // a more specific sibling component).
 //
-// - `changedFilePaths` undefined means no file data is available at all (e.g. a direct commit with no
-//   associated pull request) — returns "unknown"; callers must decide how to handle this case themselves,
-//   since a safe default depends on whether the caller is the root component or not (see determineReleaseContext.ts).
-// - A truncated result (`changedFilePathsTruncated: true`, i.e. the PR touched more files than were fetched)
-//   returns "match" whenever ownership can't be ruled out from the observed subset, to avoid silently missing a
-//   release rather than risk a spurious one.
+// `changedFilePaths` undefined means no file data is available at all (e.g. a direct commit with no associated
+// pull request) — returns "unknown"; callers must decide how to handle this case themselves, since a safe
+// default depends on whether the caller is the root component or not (see determineReleaseContext.ts). When
+// `changedFilePaths` IS defined, it is always the pull request's complete file list — Github.extractChangedFilePaths
+// throws rather than returning a partial list, so there is no "truncated" case to guess around here.
 export function matchesComponentPath(
     changedFilePaths: readonly string[] | undefined,
-    changedFilePathsTruncated: boolean | undefined,
     componentPath: string,
     allComponentPaths: readonly string[],
 ): PathFilterVerdict {
@@ -43,11 +41,6 @@ export function matchesComponentPath(
 
     const isOwned = changedFilePaths.some(path => resolveOwningComponentPath(path, allComponentPaths) === componentPath);
     if (isOwned) {
-        return "match";
-    }
-
-    if (changedFilePathsTruncated) {
-        logger.warn(`Changed files list was truncated, conservatively assuming it may affect component '${componentPath || "<root>"}'`);
         return "match";
     }
 

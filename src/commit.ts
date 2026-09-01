@@ -17,9 +17,9 @@ export interface PullRequest {
     readonly labels: string[];
     // Paths of files changed by this pull request, relative to the repository root. Used for path-based
     // component filtering in a monorepo. Undefined when not fetched (e.g. for locally-constructed pull request
-    // drafts); may be capped by the GraphQL page size (see `changedFilePathsTruncated`) for very large PRs.
+    // drafts). For pull requests with more files than fit on a single GraphQL page, this is completed via
+    // follow-up pagination (see Github.fetchRemainingChangedFilePaths); if that pagination can't fully complete
+    // (safety limit reached, or a follow-up request fails), Github throws PullRequestFilesIncompleteError
+    // rather than returning a partial list here — so whenever this field IS populated, it is always complete.
     readonly changedFilePaths?: string[];
-    // True if `changedFilePaths` did not include every file changed by the pull request (GraphQL page size
-    // exceeded). Path-based component filtering should treat this as "possibly matches" rather than "no match".
-    readonly changedFilePathsTruncated?: boolean;
 }

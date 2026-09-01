@@ -82,40 +82,56 @@ describe("Github", () => {
 
             expect(commits).toHaveLength(1);
             expect(commits[0].pullRequest?.changedFilePaths).toEqual(["a/something/Cargo.toml", "a/something/src/lib.rs"]);
-            expect(commits[0].pullRequest?.changedFilePathsTruncated).toBe(false);
         });
 
-        it("marks changed file paths as truncated and warns when the pull request has more files than fit on one page", async () => {
-            graphqlMock.mockResolvedValue({
-                repository: {
-                    ref: {
-                        target: {
-                            history: {
-                                nodes: [{
-                                    sha: "sha0",
-                                    message: "Merge PR #1",
-                                    associatedPullRequests: {
-                                        nodes: [{
-                                            number: 1,
-                                            title: "PR",
-                                            body: "body",
-                                            permalink: "permalink",
-                                            headRefName: "head",
-                                            baseRefName: "main",
-                                            mergeCommit: { oid: "sha0" },
-                                            labels: { nodes: [] },
-                                            files: {
-                                                nodes: [{ path: "a/something/Cargo.toml" }],
-                                                pageInfo: { hasNextPage: true },
-                                            },
-                                        }],
-                                    },
-                                }],
-                                pageInfo: { hasNextPage: false, endCursor: undefined },
+        it("follows pagination and merges all changed file paths when a pull request has more files than fit on one page", async () => {
+            graphqlMock.mockImplementation(async (_query: string, parameters: any) => {
+                if (parameters.number !== undefined) {
+                    // Follow-up single-PR files query.
+                    expect(parameters.cursor).toBe("cursor-page-1");
+                    return {
+                        repository: {
+                            pullRequest: {
+                                files: {
+                                    nodes: [{ path: "a/something/src/main.rs" }],
+                                    pageInfo: { hasNextPage: false, endCursor: undefined },
+                                },
+                            },
+                        },
+                    };
+                }
+
+                return {
+                    repository: {
+                        ref: {
+                            target: {
+                                history: {
+                                    nodes: [{
+                                        sha: "sha0",
+                                        message: "Merge PR #1",
+                                        associatedPullRequests: {
+                                            nodes: [{
+                                                number: 1,
+                                                title: "PR",
+                                                body: "body",
+                                                permalink: "permalink",
+                                                headRefName: "head",
+                                                baseRefName: "main",
+                                                mergeCommit: { oid: "sha0" },
+                                                labels: { nodes: [] },
+                                                files: {
+                                                    nodes: [{ path: "a/something/Cargo.toml" }],
+                                                    pageInfo: { hasNextPage: true, endCursor: "cursor-page-1" },
+                                                },
+                                            }],
+                                        },
+                                    }],
+                                    pageInfo: { hasNextPage: false, endCursor: undefined },
+                                },
                             },
                         },
                     },
-                },
+                };
             });
 
             const logger = createLogger();
@@ -125,10 +141,184 @@ describe("Github", () => {
                 commits.push(commit);
             }
 
-            expect(commits[0].pullRequest?.changedFilePathsTruncated).toBe(true);
-            expect(logger.warn).toHaveBeenCalledWith(
-                "Pull request #1 has more than 1 changed files, path-based component filtering may be incomplete"
-            );
+            expect(commits[0].pullRequest?.changedFilePaths).toEqual(["a/something/Cargo.toml", "a/something/src/main.rs"]);
+            expect(logger.warn).not.toHaveBeenCalled();
+        });
+
+        it("rejects when follow-up pagination fails", async () => {
+            graphqlMock.mockImplementation(async (_query: string, parameters: any) => {
+                if (parameters.number !== undefined) {
+                    throw new Error("boom");
+                }
+
+                return {
+                    repository: {
+                        ref: {
+                            target: {
+                                history: {
+                                    nodes: [{
+                                        sha: "sha0",
+                                        message: "Merge PR #1",
+                                        associatedPullRequests: {
+                                            nodes: [{
+                                                number: 1,
+                                                title: "PR",
+                                                body: "body",
+                                                permalink: "permalink",
+                                                headRefName: "head",
+                                                baseRefName: "main",
+                                                mergeCommit: { oid: "sha0" },
+                                                labels: { nodes: [] },
+                                                files: {
+                                                    nodes: [{ path: "a/something/Cargo.toml" }],
+                                                    pageInfo: { hasNextPage: true, endCursor: "cursor-page-1" },
+                                                },
+                                            }],
+                                        },
+                                    }],
+                                    pageInfo: { hasNextPage: false, endCursor: undefined },
+                                },
+                            },
+                        },
+                    },
+                };
+            });
+
+            const logger = createLogger();
+            const github = new Github({ owner: "owner", repo: "repo" }, "token", logger);
+            const collect = async () => {
+                const commits = [];
+                for await (const commit of github.mergeCommitIterator("main")) {
+                    commits.push(commit);
+                }
+                return commits;
+            };
+
+            await expect(collect()).rejects.toThrow("Failed to fetch all changed files for pull request #1");
+        });
+
+        it("rejects when follow-up pagination hits the safety limit", async () => {
+            let pagesFetched = 0;
+            graphqlMock.mockImplementation(async (_query: string, parameters: any) => {
+                if (parameters.number !== undefined) {
+                    pagesFetched++;
+                    return {
+                        repository: {
+                            pullRequest: {
+                                files: {
+                                    nodes: [{ path: `a/file-${pagesFetched}.rs` }],
+                                    pageInfo: { hasNextPage: true, endCursor: `cursor-${pagesFetched}` },
+                                },
+                            },
+                        },
+                    };
+                }
+
+                return {
+                    repository: {
+                        ref: {
+                            target: {
+                                history: {
+                                    nodes: [{
+                                        sha: "sha0",
+                                        message: "Merge PR #1",
+                                        associatedPullRequests: {
+                                            nodes: [{
+                                                number: 1,
+                                                title: "PR",
+                                                body: "body",
+                                                permalink: "permalink",
+                                                headRefName: "head",
+                                                baseRefName: "main",
+                                                mergeCommit: { oid: "sha0" },
+                                                labels: { nodes: [] },
+                                                files: {
+                                                    nodes: [{ path: "a/something/Cargo.toml" }],
+                                                    pageInfo: { hasNextPage: true, endCursor: "cursor-page-1" },
+                                                },
+                                            }],
+                                        },
+                                    }],
+                                    pageInfo: { hasNextPage: false, endCursor: undefined },
+                                },
+                            },
+                        },
+                    },
+                };
+            });
+
+            const logger = createLogger();
+            const github = new Github({ owner: "owner", repo: "repo" }, "token", logger);
+            const collect = async () => {
+                const commits = [];
+                for await (const commit of github.mergeCommitIterator("main")) {
+                    commits.push(commit);
+                }
+                return commits;
+            };
+
+            await expect(collect()).rejects.toThrow("giving up on pagination");
+            expect(pagesFetched).toBe(50);
+        });
+
+        it("rejects when a later page reports hasNextPage without an endCursor to follow", async () => {
+            graphqlMock.mockImplementation(async (_query: string, parameters: any) => {
+                if (parameters.number !== undefined) {
+                    return {
+                        repository: {
+                            pullRequest: {
+                                files: {
+                                    nodes: [{ path: "a/more.rs" }],
+                                    pageInfo: { hasNextPage: true, endCursor: undefined },
+                                },
+                            },
+                        },
+                    };
+                }
+
+                return {
+                    repository: {
+                        ref: {
+                            target: {
+                                history: {
+                                    nodes: [{
+                                        sha: "sha0",
+                                        message: "Merge PR #1",
+                                        associatedPullRequests: {
+                                            nodes: [{
+                                                number: 1,
+                                                title: "PR",
+                                                body: "body",
+                                                permalink: "permalink",
+                                                headRefName: "head",
+                                                baseRefName: "main",
+                                                mergeCommit: { oid: "sha0" },
+                                                labels: { nodes: [] },
+                                                files: {
+                                                    nodes: [{ path: "a/something/Cargo.toml" }],
+                                                    pageInfo: { hasNextPage: true, endCursor: "cursor-page-1" },
+                                                },
+                                            }],
+                                        },
+                                    }],
+                                    pageInfo: { hasNextPage: false, endCursor: undefined },
+                                },
+                            },
+                        },
+                    },
+                };
+            });
+
+            const github = new Github({ owner: "owner", repo: "repo" }, "token", createLogger());
+            const collect = async () => {
+                const commits = [];
+                for await (const commit of github.mergeCommitIterator("main")) {
+                    commits.push(commit);
+                }
+                return commits;
+            };
+
+            await expect(collect()).rejects.toThrow("no pagination cursor was returned");
         });
     });
 
@@ -164,7 +354,6 @@ describe("Github", () => {
 
             expect(pullRequests).toHaveLength(1);
             expect(pullRequests[0].changedFilePaths).toEqual(["b/Cargo.toml"]);
-            expect(pullRequests[0].changedFilePathsTruncated).toBe(false);
         });
     });
 });
