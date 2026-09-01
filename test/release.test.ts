@@ -45,6 +45,12 @@ describe("buildRelease", () => {
         expect(release?.tag).toBe("v1.2.3");
         expect(release?.notes).toBe(changelog.trim());
     });
+
+    it("prefixes the tag with the given component prefix", () => {
+        const release = buildRelease(pullRequest, "api-");
+
+        expect(release?.tag).toBe("api-v1.2.3");
+    });
 });
 
 const changelog = `## v1.2.3 (2025-11-26)

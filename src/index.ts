@@ -2,7 +2,7 @@ import yargs, { ArgumentsCamelCase, Argv, CommandModule } from "yargs";
 import "source-map-support/register";
 import { hideBin } from "yargs/helpers";
 import { logger } from "./logger";
-import { Manifest } from "./manifest";
+import { ManifestRunner } from "./manifestRunner";
 import { strategyTypes } from "./strategyFactory";
 
 interface GitHubArgs {
@@ -21,7 +21,7 @@ function gitHubOptions(yargs: Argv<GitHubArgs>): yargs.Argv {
             type: "string",
         })
         .option("release-type", {
-            describe: "Type of repository a release is being created for",
+            describe: "Type of repository a release is being created for; only used as a fallback when the repository has no 'release-svp-config.json'",
             choices: strategyTypes(),
         });
 }
@@ -31,8 +31,10 @@ const prepareCommand: CommandModule<{}, GitHubArgs> = {
         return gitHubOptions(yargs);
     },
     async handler(args: ArgumentsCamelCase<GitHubArgs>) {
-        const manifest = await Manifest.create(args.repoUrl ?? "", args.token ?? "", logger);
-        await manifest?.prepare(args.releaseType as string);
+        const runner = await ManifestRunner.create(args.repoUrl ?? "", args.token ?? "", args.releaseType as string | undefined, logger);
+        if (!runner || !(await runner.prepare())) {
+            process.exitCode = 1;
+        }
     },
     command: "prepare",
     describe: "Create or update a pull request representing the next release"
@@ -43,8 +45,10 @@ const releaseCommand: CommandModule<{}, GitHubArgs> = {
         return gitHubOptions(yargs);
     },
     async handler(args: ArgumentsCamelCase<GitHubArgs>) {
-        const manifest = await Manifest.create(args.repoUrl ?? "", args.token ?? "", logger);
-        await manifest?.release();
+        const runner = await ManifestRunner.create(args.repoUrl ?? "", args.token ?? "", args.releaseType as string | undefined, logger);
+        if (!runner || !(await runner.release())) {
+            process.exitCode = 1;
+        }
     },
     command: "release",
     describe: "Create a GitHub release from a release pull request"

@@ -459,6 +459,69 @@ describe("Manifest", () => {
             ).rejects.toThrow("boom");
         });
     });
+
+    describe("with a named component", () => {
+        it("prepare() namespaces the tag prefix, branch name and label", async () => {
+            const githubMock = createGithubMock({
+                pullRequestIterator: (async function* () {}),
+                createPullRequest: vi.fn().mockResolvedValue({ number: 5 }),
+            });
+            const github = new Github({ owner: "owner", repo: "repo" }, token, logger);
+
+            vi.mocked(determineReleaseContext).mockResolvedValue({
+                previousRelease: Version.parse("1.2.3"),
+                unreleasedCommits: [{
+                    sha: "sha0",
+                    message: "New commit",
+                    isMergeCommit: false,
+                }],
+            });
+            vi.mocked(buildStrategy).mockReturnValue({
+                config: { github },
+                async determineUpdates(_options: UpdateOptions): Promise<Update[]> {
+                    return [];
+                }
+            });
+
+            const manifest = Manifest.forComponent(github, { owner: "owner", repo: "repo" }, "main", "api");
+            await manifest.prepare("rust");
+
+            expect(determineReleaseContext).toHaveBeenCalledWith(expect.anything(), "main", "api-", "", [""], undefined);
+            expect(githubMock.createPullRequest).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    headBranchName: "release-svp--branches-main--api",
+                    labels: ["autorelease: pending (api)"],
+                }),
+                expect.anything(),
+                expect.anything(),
+            );
+        });
+
+        it("release() namespaces the tag prefix, branch name and label", async () => {
+            const githubMock = createGithubMock();
+            const github = new Github({ owner: "owner", repo: "repo" }, token, logger);
+            const namespacedRelease: Release = {
+                sha: "sha0",
+                tag: "api-v1.2.4",
+                notes: "notes",
+                pullRequestNumber: 4,
+            };
+
+            vi.mocked(determineReleases).mockResolvedValue([namespacedRelease]);
+            vi.mocked(githubMock.createRelease).mockResolvedValue({ id: 1, url: "url", pullRequestNumber: 4 });
+
+            const manifest = Manifest.forComponent(github, { owner: "owner", repo: "repo" }, "main", "api");
+            await manifest.release();
+
+            expect(determineReleases).toHaveBeenCalledWith(expect.anything(), "main", {
+                releaseBranchName: "release-svp--branches-main--api",
+                labelPending: "autorelease: pending (api)",
+                tagPrefix: "api-",
+            });
+            expect(githubMock.removePullRequestLabels).toHaveBeenCalledWith(["autorelease: pending (api)"], 4);
+            expect(githubMock.addPullRequestLabels).toHaveBeenCalledWith(["autorelease: tagged (api)"], 4);
+        });
+    });
 });
 
 function createGithubMock(overrides?: Partial<Github>) {

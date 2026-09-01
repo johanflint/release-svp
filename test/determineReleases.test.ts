@@ -10,7 +10,7 @@ import { Tag } from "../src/tag";
 describe("determineReleases", () => {
     const github = new Github({ repo: "repo", owner: "owner" }, "token", logger);
     const options: ReleaseOptions = {
-        releaseBranchPrefix: "release-svp--branches-",
+        releaseBranchName: "release-svp--branches-main",
         labelPending: "autorelease: pending",
     };
 
@@ -66,6 +66,34 @@ describe("determineReleases", () => {
 
             const result = await determineReleases(github, "main", options);
             expect(result.length).toBe(0);
+        });
+
+        it("ignores pull requests whose branch name only has the release branch name as a prefix", async () => {
+            // Regression test: a component's release branch (e.g. "release-svp--branches-main--api") must not
+            // match another component's exact branch name check just because it starts with the same string.
+            vi.spyOn(github, "pullRequestIterator").mockImplementation(async function* () {
+                yield {
+                    ...defaultPullRequest,
+                    headBranchName: "release-svp--branches-main--api",
+                    labels: [],
+                }
+            });
+
+            const result = await determineReleases(github, "main", options);
+            expect(result.length).toBe(0);
+        });
+
+        it("prefixes the release tag with the given component prefix", async () => {
+            vi.spyOn(github, "pullRequestIterator").mockImplementation(async function* () {
+                yield {
+                    ...defaultPullRequest,
+                    headBranchName: "release-svp--branches-main--api",
+                    labels: [],
+                }
+            });
+
+            const result = await determineReleases(github, "main", { ...options, releaseBranchName: "release-svp--branches-main--api", tagPrefix: "api-" });
+            expect(result).toEqual([{ ...expectedRelease, tag: "api-v0.1.0" }]);
         });
 
         it("ignores pull requests that have been released", async () => {

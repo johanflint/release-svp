@@ -23,6 +23,14 @@ query pullRequestsSince($owner: String!, $repo: String!, $count: Int!, $targetBr
                                             name
                                         }
                                     }
+                                    files(first: 100) {
+                                        nodes {
+                                            path
+                                        }
+                                        pageInfo {
+                                            hasNextPage
+                                        }
+                                    }
                                 }
                             }
                         }

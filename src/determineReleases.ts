@@ -8,20 +8,23 @@ import { Tag } from "./tag";
 const RELEASE_HISTORY_DEPTH: number = 10;
 
 export interface ReleaseOptions {
-    releaseBranchPrefix: string;
+    // Exact release-PR branch name (not a prefix) to match against — see componentNaming.releaseBranchName.
+    releaseBranchName: string;
     labelPending: string;
+    // Prefix applied to release tags, scoping them to a single component — see componentNaming.tagPrefix.
+    tagPrefix?: string;
 }
 
 export async function determineReleases(github: Github, targetBranch: string, options: ReleaseOptions): Promise<Release[]> {
     logger.info("Finding release candidates...");
-    const versionTags = await retrieveVersionTags(github);
+    const versionTags = await retrieveVersionTags(github, options.tagPrefix ?? "");
     const releasedShas = new Set(versionTags.map(tag => tag.sha));
 
     const mergedPullRequests = github.pullRequestIterator(targetBranch, "MERGED");
     const releases: Release[] = [];
     let confirmedReleaseCount = 0;
     for await (const pullRequest of mergedPullRequests) {
-        const isReleasePullRequest = pullRequest.headBranchName.startsWith(options.releaseBranchPrefix) || pullRequest.labels.includes(options.labelPending);
+        const isReleasePullRequest = pullRequest.headBranchName === options.releaseBranchName || pullRequest.labels.includes(options.labelPending);
         if (!isReleasePullRequest) {
             continue;
         }
@@ -37,7 +40,7 @@ export async function determineReleases(github: Github, targetBranch: string, op
             continue;
         }
 
-        const release = buildRelease(pullRequest);
+        const release = buildRelease(pullRequest, options.tagPrefix);
         if (release) {
             logger.debug(`Found unreleased pull request #${pullRequest.number}`);
             releases.push(release);
@@ -49,10 +52,10 @@ export async function determineReleases(github: Github, targetBranch: string, op
     return releases;
 }
 
-async function retrieveVersionTags(github: Github) {
+async function retrieveVersionTags(github: Github, tagPrefix: string) {
     const tags: Tag[] = [];
     for await (const tag of github.tagIterator(100)) {
-        if (parseVersionTag(tag.name)) {
+        if (parseVersionTag(tag.name, tagPrefix)) {
             tags.push(tag);
         }
     }
