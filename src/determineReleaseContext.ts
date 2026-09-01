@@ -119,7 +119,7 @@ function truncateAtCutover(commits: Commit[], cutoverCommit: string): Commit[] {
 function filterCommitsByComponent(commits: Commit[], componentPath: string, allComponentPaths: readonly string[]): Commit[] {
     return commits.filter(commit => {
         const pullRequest = commit.pullRequest;
-        const verdict = matchesComponentPath(pullRequest?.changedFilePaths, pullRequest?.changedFilePathsTruncated, componentPath, allComponentPaths);
+        const verdict = matchesComponentPath(pullRequest?.changedFilePaths, componentPath, allComponentPaths);
         if (verdict !== "unknown") {
             return verdict === "match";
         }

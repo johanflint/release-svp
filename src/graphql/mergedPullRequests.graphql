@@ -21,6 +21,7 @@ query mergedPullRequests($owner: String!, $repo: String!, $count: Int!, $targetB
                     }
                     pageInfo {
                         hasNextPage
+                        endCursor
                     }
                 }
             }

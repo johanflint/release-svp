@@ -4,8 +4,10 @@ import { createPullRequest } from "code-suggester";
 import { Octokit, RequestError } from "octokit";
 import { RequestError as RequestErrorBody } from "@octokit/types";
 import { Commit, PullRequest } from "./commit";
+import { ConcurrencyLimit } from "./concurrencyLimit";
 import latestTagsQuery from "./graphql/latestTags.graphql";
 import mergedPullRequestsQuery from "./graphql/mergedPullRequests.graphql";
+import pullRequestFilesQuery from "./graphql/pullRequestFiles.graphql";
 import pullRequestsSinceQuery from "./graphql/pullRequestsSince.graphql";
 import { Logger } from "./logger";
 import { Release } from "./release";
@@ -13,11 +15,37 @@ import { Repository } from "./repository";
 import { Tag } from "./tag";
 import { Update } from "./update";
 
+// Safety ceiling on how many *additional* pages of changed files to fetch for a single pull request (beyond the
+// first page already included in the bulk commit/PR query), so a pathological or misbehaving response can't
+// cause an unbounded number of follow-up requests — see fetchRemainingChangedFilePaths below. 50 pages of 100
+// files each covers pull requests with up to 5,000 changed files, comfortably more than any real-world PR.
+const MAX_ADDITIONAL_CHANGED_FILE_PAGES = 50;
+
+// Bounds how many pull requests' follow-up changed-file pagination (see fetchRemainingChangedFilePaths) can be
+// in flight at once. A page of commits/PRs is otherwise mapped fully concurrently (see mergeCommitsGraphQL /
+// pullRequestsGraphQL), which is fine for the common case (a PR's files fit on the first page, no extra
+// requests needed) but could otherwise let several oversized PRs in the same page each fire off a burst of
+// follow-up requests simultaneously, risking GitHub's secondary/abuse rate limiting. Deliberately small and
+// conservative — this path is already the rare case, so there's no performance reason to raise it.
+const MAX_CONCURRENT_CHANGED_FILE_PAGINATIONS = 2;
+
+// Thrown when a pull request's full changed-file list cannot be obtained (pagination exhausted the safety
+// limit, or a follow-up request failed/returned malformed pagination data). Callers must not guess component
+// ownership from a partial file list — see extractChangedFilePaths/fetchRemainingChangedFilePaths.
+export class PullRequestFilesIncompleteError extends Error {
+    constructor(message: string, options?: { cause?: unknown }) {
+        super(message, options);
+        this.name = "PullRequestFilesIncompleteError";
+    }
+}
+
 export class Github {
     private readonly repository: Repository;
     private readonly octokit: Octokit;
     private readonly restOctokit: RestOctokit;
     private readonly fileCache: RepositoryFileCache;
+    // Shared across every call the instance makes (not per fetched page) — see MAX_CONCURRENT_CHANGED_FILE_PAGINATIONS.
+    private readonly changedFilesPaginationLimit = new ConcurrencyLimit(MAX_CONCURRENT_CHANGED_FILE_PAGINATIONS);
 
     constructor(repository: Repository, token: string, private readonly logger: Logger) {
         this.repository = repository;
@@ -102,7 +130,7 @@ export class Github {
         const history = response.repository.ref.target.history;
         const commits = (history.nodes || []) as GraphQLCommit[];
 
-        const mappedCommits = commits.map<Commit>(commit => {
+        const mappedCommits = await Promise.all(commits.map<Promise<Commit>>(async commit => {
             const mergePullRequest = commit.associatedPullRequests.nodes.find(pr => pr.mergeCommit?.oid === commit.sha);
             const associatedPullRequest = mergePullRequest || commit.associatedPullRequests.nodes[0];
             const pullRequest: PullRequest | undefined = associatedPullRequest ? {
@@ -115,7 +143,7 @@ export class Github {
                 baseBranchName: associatedPullRequest.baseRefName,
                 mergeCommitOid: associatedPullRequest.mergeCommit?.oid,
                 labels: associatedPullRequest.labels.nodes.map(node => node.name),
-                ...this.extractChangedFilePaths(associatedPullRequest, associatedPullRequest.number),
+                ...await this.extractChangedFilePaths(associatedPullRequest, associatedPullRequest.number),
             } : undefined;
 
             return {
@@ -124,7 +152,7 @@ export class Github {
                 isMergeCommit: mergePullRequest !== undefined,
                 pullRequest,
             };
-        });
+        }));
 
         return {
             pageInfo: history.pageInfo,
@@ -251,7 +279,7 @@ export class Github {
 
         return {
             pageInfo: response.repository.pullRequests.pageInfo,
-            data: pullRequests.map(pullRequest => {
+            data: await Promise.all(pullRequests.map(async pullRequest => {
                 return {
                     sha: pullRequest.mergeCommit?.oid, // already filtered non-merged
                     number: pullRequest.number,
@@ -262,27 +290,97 @@ export class Github {
                     baseBranchName: pullRequest.baseRefName,
                     mergeCommitOid: pullRequest.mergeCommit?.oid,
                     labels: (pullRequest.labels?.nodes || []).map(l => l.name),
-                    ...this.extractChangedFilePaths(pullRequest, pullRequest.number),
+                    ...await this.extractChangedFilePaths(pullRequest, pullRequest.number),
                 };
-            }),
+            })),
         };
     }
 
-    // Extracts the changed file paths for a pull request from its GraphQL `files` connection, warning (once per
-    // pull request) if the result was truncated by the page size — callers must then treat "no path matched" as
-    // inconclusive rather than a confident non-match.
-    private extractChangedFilePaths(pullRequest: GraphQLPullRequest, pullRequestNumber: number): Pick<PullRequest, "changedFilePaths" | "changedFilePathsTruncated"> {
+    // Extracts the full changed-file path list for a pull request, following GraphQL cursor pagination beyond
+    // the bulk query's first page of 100 (see fetchRemainingChangedFilePaths) whenever the pull request touched
+    // more files than that. Throws PullRequestFilesIncompleteError if the complete list cannot be obtained —
+    // callers must not guess component ownership from a partial file list (see componentPathFilter.ts): for a
+    // component release tool, silently assuming every component was touched by an under-fetched giant PR is
+    // worse than failing that pull request's release determination outright.
+    private async extractChangedFilePaths(pullRequest: GraphQLPullRequest, pullRequestNumber: number): Promise<Pick<PullRequest, "changedFilePaths">> {
         if (!pullRequest.files) {
             return {};
         }
 
-        const changedFilePaths = pullRequest.files.nodes.map(node => node.path);
-        const changedFilePathsTruncated = pullRequest.files.pageInfo.hasNextPage;
-        if (changedFilePathsTruncated) {
-            this.logger.warn(`Pull request #${pullRequestNumber} has more than ${changedFilePaths.length} changed files, path-based component filtering may be incomplete`);
+        const firstPagePaths = pullRequest.files.nodes.map(node => node.path);
+        if (!pullRequest.files.pageInfo.hasNextPage) {
+            return { changedFilePaths: firstPagePaths };
         }
 
-        return { changedFilePaths, changedFilePathsTruncated };
+        const firstCursor = pullRequest.files.pageInfo.endCursor;
+        if (!firstCursor) {
+            throw new PullRequestFilesIncompleteError(`Pull request #${pullRequestNumber} has more changed files than fit on one page, but no pagination cursor was returned`);
+        }
+
+        return this.changedFilesPaginationLimit.run(() => this.fetchRemainingChangedFilePaths(pullRequestNumber, firstPagePaths, firstCursor));
+    }
+
+    // Follows GraphQL cursor pagination to fetch every remaining page of a pull request's changed files, beyond
+    // the first page already fetched by the bulk commit/PR query. Bounded by MAX_ADDITIONAL_CHANGED_FILE_PAGES
+    // so a pathological response can't cause unbounded follow-up requests. If that limit is hit, a follow-up
+    // request fails outright, or a later page reports `hasNextPage` without an `endCursor` to follow, throws
+    // PullRequestFilesIncompleteError rather than silently returning an incomplete file list as if it were
+    // complete — see extractChangedFilePaths for why guessing here is unacceptable.
+    private async fetchRemainingChangedFilePaths(pullRequestNumber: number, firstPagePaths: string[], firstCursor: string): Promise<Pick<PullRequest, "changedFilePaths">> {
+        const paths = [...firstPagePaths];
+        let cursor: string | undefined = firstCursor;
+        let pagesFetched = 0;
+
+        while (cursor !== undefined) {
+            if (pagesFetched === MAX_ADDITIONAL_CHANGED_FILE_PAGES) {
+                const maxFiles = (MAX_ADDITIONAL_CHANGED_FILE_PAGES + 1) * 100; // +1 for the first page already fetched
+                throw new PullRequestFilesIncompleteError(`Pull request #${pullRequestNumber} has more than ${maxFiles} changed files, giving up on pagination`);
+            }
+
+            let page: Response<string> | null;
+            try {
+                page = await this.pullRequestFilesGraphQL(pullRequestNumber, cursor);
+            } catch (e) {
+                throw new PullRequestFilesIncompleteError(`Failed to fetch all changed files for pull request #${pullRequestNumber}`, { cause: e });
+            }
+            pagesFetched++;
+            if (!page) {
+                throw new PullRequestFilesIncompleteError(`No response fetching additional changed files for pull request #${pullRequestNumber}`);
+            }
+
+            paths.push(...page.data);
+            if (!page.pageInfo.hasNextPage) {
+                cursor = undefined;
+            } else if (!page.pageInfo.endCursor) {
+                throw new PullRequestFilesIncompleteError(`Pull request #${pullRequestNumber} has more changed files than fit on one page, but no pagination cursor was returned`);
+            } else {
+                cursor = page.pageInfo.endCursor;
+            }
+        }
+
+        return { changedFilePaths: paths };
+    }
+
+    private async pullRequestFilesGraphQL(pullRequestNumber: number, cursor: string): Promise<Response<string> | null> {
+        this.logger.debug(`Fetching additional changed files for pull request #${pullRequestNumber} with cursor '${cursor}'...`);
+        const parameters = {
+            cursor,
+            owner: this.repository.owner,
+            repo: this.repository.repo,
+            number: pullRequestNumber,
+        };
+        const response: any = await this.octokit.graphql(pullRequestFilesQuery, parameters);
+
+        if (!response?.repository?.pullRequest?.files) {
+            this.logger.warn(`No response received for query: ${pullRequestFilesQuery}`, parameters);
+            return null;
+        }
+
+        const files = response.repository.pullRequest.files;
+        return {
+            data: (files.nodes || []).map((node: { path: string }) => node.path),
+            pageInfo: files.pageInfo,
+        };
     }
 
     async retrieveFileContents(path: string, branch: string): Promise<GitHubFileContents> {
@@ -422,6 +520,7 @@ interface GraphQLPullRequest {
         }[];
         pageInfo: {
             hasNextPage: boolean;
+            endCursor?: string;
         };
     };
 }

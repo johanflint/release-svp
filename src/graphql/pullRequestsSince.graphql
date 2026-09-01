@@ -29,6 +29,7 @@ query pullRequestsSince($owner: String!, $repo: String!, $count: Int!, $targetBr
                                         }
                                         pageInfo {
                                             hasNextPage
+                                            endCursor
                                         }
                                     }
                                 }

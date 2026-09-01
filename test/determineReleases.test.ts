@@ -126,6 +126,47 @@ describe("determineReleases", () => {
             expect(result.length).toBe(0);
         });
     });
+
+    describe("scanning for this component's own tags in a monorepo's repo-wide tag history", () => {
+        // Regression tests for the "100-tag cap" gap: in a monorepo, tags from every component interleave
+        // (newest-first) in the repo-wide tag feed, so a fixed *total* tag count previously risked missing this
+        // component's own recent tags entirely if other components released more often — see determineReleases.ts.
+
+        it("keeps scanning past 100 repo-wide tags to find this component's own matching tag", async () => {
+            vi.spyOn(github, "tagIterator").mockImplementation(async function* (): AsyncGenerator<Tag> {
+                // 150 unrelated tags (e.g. another component's releases) before this component's own tag appears.
+                for (let i = 0; i < 150; i++) {
+                    yield { sha: `other-${i}`, name: `other-v${i}.0.0`, committedDate: "" };
+                }
+                yield { sha: "released-a", name: "a-v1.0.0", committedDate: "" };
+            });
+            vi.spyOn(github, "pullRequestIterator").mockImplementation(async function* () {
+                yield { ...defaultPullRequest, sha: "released-a" };
+            });
+
+            const result = await determineReleases(github, "main", { ...options, tagPrefix: "a-" });
+
+            // Recognized as already released only if the scan reached the 151st tag, beyond the old 100 cap.
+            expect(result.length).toBe(0);
+        });
+
+        it("stops scanning and warns after the safety limit when no matching tag is found", async () => {
+            vi.spyOn(github, "tagIterator").mockImplementation(async function* (): AsyncGenerator<Tag> {
+                for (let i = 0; i < 1500; i++) {
+                    yield { sha: `other-${i}`, name: `other-v${i}.0.0`, committedDate: "" };
+                }
+            });
+            vi.spyOn(github, "pullRequestIterator").mockImplementation(async function* () {
+                yield { ...defaultPullRequest, sha: "unreleased" };
+            });
+            vi.spyOn(logger, "warn");
+
+            const result = await determineReleases(github, "main", { ...options, tagPrefix: "a-" });
+
+            expect(logger.warn).toHaveBeenCalledWith("⚠️ Scanned 1000 tags without finding 10 releases for tag prefix 'a-', stopping");
+            expect(result).toEqual([{ ...expectedRelease, sha: "unreleased", tag: "a-v0.1.0" }]);
+        });
+    });
 });
 
 const defaultPullRequest: PullRequest = {
