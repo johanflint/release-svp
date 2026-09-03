@@ -277,7 +277,7 @@ describe("Manifest", () => {
                 const existingPullRequest: PullRequest = {
                     ...pullRequest,
                     title: "Release v1.2.4",
-                    body: createPullRequestBody(undefined),
+                    body: createPullRequestBody([{ componentName: "", notes: undefined as unknown as string }]),
                     headBranchName: "release-svp--branches-main",
                     labels: ["autorelease: pending"]
                 };
@@ -319,7 +319,7 @@ describe("Manifest", () => {
                 const existingPullRequest: PullRequest = {
                     ...pullRequest,
                     title: "Release v1.2.4",
-                    body: createPullRequestBody(undefined),
+                    body: createPullRequestBody([{ componentName: "", notes: undefined as unknown as string }]),
                     headBranchName: "release-svp--branches-main",
                     labels: [] // No pending label
                 };
@@ -517,6 +517,7 @@ describe("Manifest", () => {
                 releaseBranchName: "release-svp--branches-main--api",
                 labelPending: "autorelease: pending (api)",
                 tagPrefix: "api-",
+                componentName: "api",
             });
             expect(githubMock.removePullRequestLabels).toHaveBeenCalledWith(["autorelease: pending (api)"], 4);
             expect(githubMock.addPullRequestLabels).toHaveBeenCalledWith(["autorelease: tagged (api)"], 4);

@@ -98,7 +98,7 @@ export class Manifest {
         const pullRequest: PullRequest = {
             number: -1,
             title: `Release v${candidate.releaseVersion}`,
-            body: createPullRequestBody(candidate.changelog),
+            body: createPullRequestBody([{ componentName: this.componentName, notes: candidate.changelog }]),
             permalink: "unused",
             headBranchName: releaseBranchName(this.targetBranch, this.componentName),
             baseBranchName: this.targetBranch,
@@ -136,6 +136,7 @@ export class Manifest {
             releaseBranchName: releaseBranchName(this.targetBranch, this.componentName),
             labelPending: pendingLabel(this.componentName),
             tagPrefix: tagPrefix(this.componentName),
+            componentName: this.componentName,
         });
 
         if (releases.length === 0) {

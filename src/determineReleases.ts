@@ -1,7 +1,7 @@
 import { Github } from "./github";
 import { logger } from "./logger";
 import { parseVersionTag } from "./parseVersionTag";
-import { buildRelease, Release } from "./release";
+import { buildReleaseForComponent, Release } from "./release";
 import { Tag } from "./tag";
 
 // How deep into the release history to scan before assuming everything older is already released
@@ -19,6 +19,9 @@ export interface ReleaseOptions {
     labelPending: string;
     // Prefix applied to release tags, scoping them to a single component — see componentNaming.tagPrefix.
     tagPrefix?: string;
+    // Which component's release-notes section to extract from a (possibly multi-component) pull request body —
+    // see release.ts, `buildReleaseForComponent`. "" for the root component.
+    componentName: string;
 }
 
 export async function determineReleases(github: Github, targetBranch: string, options: ReleaseOptions): Promise<Release[]> {
@@ -46,7 +49,7 @@ export async function determineReleases(github: Github, targetBranch: string, op
             continue;
         }
 
-        const release = buildRelease(pullRequest, options.tagPrefix);
+        const release = buildReleaseForComponent(pullRequest, options.componentName, options.tagPrefix);
         if (release) {
             logger.debug(`Found unreleased pull request #${pullRequest.number}`);
             releases.push(release);

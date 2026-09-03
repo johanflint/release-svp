@@ -12,6 +12,7 @@ describe("determineReleases", () => {
     const options: ReleaseOptions = {
         releaseBranchName: "release-svp--branches-main",
         labelPending: "autorelease: pending",
+        componentName: "",
     };
 
     vi.spyOn(github, "tagIterator").mockImplementation(async function* (): AsyncGenerator<Tag> {
@@ -173,7 +174,7 @@ const defaultPullRequest: PullRequest = {
     sha: "sha",
     number: 1,
     title: "Title",
-    body: createPullRequestBody("## v0.1.0\n\n- Release notes"),
+    body: createPullRequestBody([{ componentName: "", notes: "## v0.1.0\n\n- Release notes" }]),
     permalink: "permalink",
     headBranchName: "release-svp--branches-main",
     baseBranchName: "main",
