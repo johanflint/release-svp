@@ -1,7 +1,7 @@
 import { Github } from "./github";
 import { logger } from "./logger";
 import { parseVersionTag } from "./parseVersionTag";
-import { buildReleaseForComponent, Release } from "./release";
+import { buildReleaseForComponent, pullRequestCoversComponent, Release } from "./release";
 import { Tag } from "./tag";
 
 // How deep into the release history to scan before assuming everything older is already released
@@ -35,6 +35,15 @@ export async function determineReleases(github: Github, targetBranch: string, op
     for await (const pullRequest of mergedPullRequests) {
         const isReleasePullRequest = pullRequest.headBranchName === options.releaseBranchName || pullRequest.labels.includes(options.labelPending);
         if (!isReleasePullRequest) {
+            continue;
+        }
+
+        // Once a pull request can bundle several components' notes together (see README.md, "Combined release
+        // pull requests"), a branch/label match alone isn't enough — it only proves the pull request BELONGS to
+        // this component's release group, not that this specific component is (still) a member of it. See
+        // `pullRequestCoversComponent`.
+        if (!pullRequestCoversComponent(pullRequest.body, options.componentName)) {
+            logger.trace(`Pull request #${pullRequest.number} matched by branch/label but has no release notes section for component '${options.componentName || "<root>"}', skipping`);
             continue;
         }
 

@@ -29,6 +29,27 @@ export function buildReleaseForComponent(mergedPullRequest: PullRequest, compone
     };
 }
 
+// Discovery-time guard used by `determineReleases` before it even attempts to build a release: a pull request
+// whose branch name or pending label matches a component isn't necessarily THAT component's release, once a
+// single pull request can bundle several components' notes together (see README.md, "Combined release pull
+// requests") — e.g. a component whose branch/label happen to be shared with a release-group PR it isn't (or
+// isn't anymore) a member of. Returns `true` for a legacy, pre-combined-PR body with no markers at all (those
+// only ever cover a single component — see `extractNotesForComponent`'s matching fallback) and for a body that
+// fails to parse at all, leaving that diagnosis to `buildReleaseForComponent`'s own parsing/logging.
+export function pullRequestCoversComponent(body: string, componentName: string): boolean {
+    const pullRequestBody = parsePullRequestBody(body);
+    if (!pullRequestBody) {
+        return true;
+    }
+
+    const sections = extractComponentSections(pullRequestBody.content);
+    if (sections.length === 0) {
+        return true;
+    }
+
+    return sections.some(section => section.componentName === componentName);
+}
+
 const VERSION_REGEX = /^#{2,} v?\[?(?<version>\d+\.\d+\.\d+[^\]]*)]?/;
 function extractReleaseInfo(body: string, pullRequestNumber: number, componentName: string) {
     const pullRequestBody = parsePullRequestBody(body);
