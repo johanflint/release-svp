@@ -11,7 +11,21 @@ import { PullRequestChangelogNoteBuilder } from "./pullRequestChangelogNoteBuild
 import { Repository } from "./repository";
 import { UpdateOptions } from "./strategy";
 import { buildStrategy } from "./strategyFactory";
+import { Update } from "./update";
 import { SemanticVersioningStrategy } from "./versioningStrategies/semantic";
+import { Version } from "./version";
+
+// The pure result of "would this component release, and what would it contain" — computed without any GitHub
+// side effects (no pull request is created/updated/read). Kept separate from opening/updating the pull request
+// itself so callers preparing multiple components (see ManifestRunner) can inspect every component's candidate
+// up front — e.g. to detect two components whose `updates` collide on the same file path — before any of them
+// touch GitHub.
+export interface ComponentCandidate {
+    readonly componentName: string;
+    readonly releaseVersion: Version;
+    readonly changelog: string;
+    readonly updates: readonly Update[];
+}
 
 export class Manifest {
     // `componentName` is "" for the root component (single-project, backward-compatible naming — see
@@ -30,6 +44,16 @@ export class Manifest {
     ) {}
 
     async prepare(releaseType: string) {
+        const candidate = await this.computeCandidate(releaseType);
+        if (!candidate) {
+            return;
+        }
+        await this.openOrUpdatePullRequest(candidate);
+    }
+
+    // Computes what this component's next release would look like (version, changelog, file updates) without
+    // touching GitHub's pull request state at all. Returns `undefined` when there's nothing to release.
+    async computeCandidate(releaseType: string): Promise<ComponentCandidate | undefined> {
         logger.info(`Prepare release for repository '${this.repository.owner}/${this.repository.repo}'`);
         const releaseContext = await determineReleaseContext(
             this.github,
@@ -42,7 +66,7 @@ export class Manifest {
 
         if (releaseContext.unreleasedCommits.length === 0) {
             logger.info(`No unreleased commits, nothing to do 🕸️`);
-            return;
+            return undefined;
         }
 
         logger.info(`Previous release is 'v${releaseContext.previousRelease}', ${releaseContext.unreleasedCommits.length} unreleased commit(s)`);
@@ -65,10 +89,16 @@ export class Manifest {
         };
         const updates = await strategy.determineUpdates(updateOptions);
 
+        return { componentName: this.componentName, releaseVersion, changelog, updates };
+    }
+
+    // Opens a new pull request for this candidate, or updates the existing one if it's already open. The only
+    // GitHub-mutating half of what used to be `prepare()` — see `computeCandidate` for the pure computation.
+    async openOrUpdatePullRequest(candidate: ComponentCandidate): Promise<void> {
         const pullRequest: PullRequest = {
             number: -1,
-            title: `Release v${releaseVersion}`,
-            body: createPullRequestBody(changelog),
+            title: `Release v${candidate.releaseVersion}`,
+            body: createPullRequestBody(candidate.changelog),
             permalink: "unused",
             headBranchName: releaseBranchName(this.targetBranch, this.componentName),
             baseBranchName: this.targetBranch,
@@ -76,17 +106,17 @@ export class Manifest {
         }
 
         const existingPullRequest = await this.findExistingPullRequest(pullRequest, this.github);
-        const commitMessage = `Release v${releaseVersion}`;
+        const commitMessage = `Release v${candidate.releaseVersion}`;
         if (existingPullRequest?.body === pullRequest.body && existingPullRequest.title === pullRequest.title) {
             logger.info(`Done, pull request https://github.com/${this.repository.owner}/${this.repository.repo}/pull/${existingPullRequest.number} remained the same`);
             return;
         }
 
         if (existingPullRequest) {
-            const updatedPullRequest = await this.github.updatePullRequest(pullRequest, commitMessage, updates);
+            const updatedPullRequest = await this.github.updatePullRequest(pullRequest, commitMessage, [...candidate.updates]);
             logger.info(`Updated pull request https://github.com/${this.repository.owner}/${this.repository.repo}/pull/${updatedPullRequest.number}`);
         } else {
-            const createdPullRequest = await this.github.createPullRequest(pullRequest, commitMessage, updates);
+            const createdPullRequest = await this.github.createPullRequest(pullRequest, commitMessage, [...candidate.updates]);
             logger.info(`Created pull request https://github.com/${this.repository.owner}/${this.repository.repo}/pull/${createdPullRequest.number}`);
         }
     }

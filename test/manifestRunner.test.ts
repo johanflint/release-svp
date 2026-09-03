@@ -279,17 +279,19 @@ describe("ManifestRunner", () => {
             const result = await ManifestRunner.create("owner/repo", token, undefined, logger);
             expect(result).not.toBeNull();
 
-            const prepareA = vi.fn().mockRejectedValue(new Error("boom"));
-            const prepareB = vi.fn().mockResolvedValue(undefined);
+            const computeCandidateA = vi.fn().mockRejectedValue(new Error("boom"));
+            const computeCandidateB = vi.fn().mockResolvedValue({ componentName: "project-b", releaseVersion: Version.parse("1.0.0"), changelog: "", updates: [] });
+            const openOrUpdatePullRequestB = vi.fn().mockResolvedValue(undefined);
             vi.mocked(Manifest.forComponent)
-                .mockReturnValueOnce({ prepare: prepareA } as unknown as Manifest)
-                .mockReturnValueOnce({ prepare: prepareB } as unknown as Manifest);
+                .mockReturnValueOnce({ computeCandidate: computeCandidateA } as unknown as Manifest)
+                .mockReturnValueOnce({ computeCandidate: computeCandidateB, openOrUpdatePullRequest: openOrUpdatePullRequestB } as unknown as Manifest);
             vi.spyOn(logger, "error");
 
             await result!.prepare();
 
-            expect(prepareA).toHaveBeenCalledWith("rust");
-            expect(prepareB).toHaveBeenCalledWith("rust");
+            expect(computeCandidateA).toHaveBeenCalledWith("rust");
+            expect(computeCandidateB).toHaveBeenCalledWith("rust");
+            expect(openOrUpdatePullRequestB).toHaveBeenCalled();
             expect(logger.error).toHaveBeenCalledWith("Failed to prepare release for component 'project-a'", expect.any(Error));
         });
 
@@ -309,8 +311,11 @@ describe("ManifestRunner", () => {
             expect(result).not.toBeNull();
 
             vi.mocked(Manifest.forComponent)
-                .mockReturnValueOnce({ prepare: vi.fn().mockRejectedValue(new Error("boom")) } as unknown as Manifest)
-                .mockReturnValueOnce({ prepare: vi.fn().mockResolvedValue(undefined) } as unknown as Manifest);
+                .mockReturnValueOnce({ computeCandidate: vi.fn().mockRejectedValue(new Error("boom")) } as unknown as Manifest)
+                .mockReturnValueOnce({
+                    computeCandidate: vi.fn().mockResolvedValue({ componentName: "project-b", releaseVersion: Version.parse("1.0.0"), changelog: "", updates: [] }),
+                    openOrUpdatePullRequest: vi.fn().mockResolvedValue(undefined),
+                } as unknown as Manifest);
             vi.spyOn(logger, "error");
 
             await expect(result!.prepare()).resolves.toBe(false);
@@ -331,9 +336,48 @@ describe("ManifestRunner", () => {
             const result = await ManifestRunner.create("owner/repo", token, undefined, logger);
             expect(result).not.toBeNull();
 
-            vi.mocked(Manifest.forComponent).mockReturnValue({ prepare: vi.fn().mockResolvedValue(undefined) } as unknown as Manifest);
+            vi.mocked(Manifest.forComponent).mockReturnValue({
+                computeCandidate: vi.fn().mockResolvedValue({ componentName: "project-a", releaseVersion: Version.parse("1.0.0"), changelog: "", updates: [] }),
+                openOrUpdatePullRequest: vi.fn().mockResolvedValue(undefined),
+            } as unknown as Manifest);
 
             await expect(result!.prepare()).resolves.toBe(true);
+        });
+
+        it("returns false and refuses to open any pull request when two components' updates target the same path", async () => {
+            createGithubMock({
+                retrieveFileContents: vi.fn().mockResolvedValue({
+                    parsedContent: JSON.stringify({
+                        components: [
+                            { path: "a", component: "project-a", releaseType: "rust" },
+                            { path: "b", component: "project-b", releaseType: "rust" },
+                        ],
+                    }),
+                }),
+            });
+
+            const result = await ManifestRunner.create("owner/repo", token, undefined, logger);
+            expect(result).not.toBeNull();
+
+            const sharedUpdate = { path: "CHANGELOG.md", createIfMissing: true, updater: { updateContent: vi.fn() } };
+            const openOrUpdatePullRequestA = vi.fn().mockResolvedValue(undefined);
+            const openOrUpdatePullRequestB = vi.fn().mockResolvedValue(undefined);
+            vi.mocked(Manifest.forComponent)
+                .mockReturnValueOnce({
+                    computeCandidate: vi.fn().mockResolvedValue({ componentName: "project-a", releaseVersion: Version.parse("1.0.0"), changelog: "", updates: [sharedUpdate] }),
+                    openOrUpdatePullRequest: openOrUpdatePullRequestA,
+                } as unknown as Manifest)
+                .mockReturnValueOnce({
+                    computeCandidate: vi.fn().mockResolvedValue({ componentName: "project-b", releaseVersion: Version.parse("1.0.0"), changelog: "", updates: [sharedUpdate] }),
+                    openOrUpdatePullRequest: openOrUpdatePullRequestB,
+                } as unknown as Manifest);
+            vi.spyOn(logger, "error");
+
+            await expect(result!.prepare()).resolves.toBe(false);
+
+            expect(logger.error).toHaveBeenCalledWith("Update path collision: 'CHANGELOG.md' would be written by multiple components [project-a, project-b] — refusing to prepare any release this run, since combining them would let one component's changes silently overwrite another's");
+            expect(openOrUpdatePullRequestA).not.toHaveBeenCalled();
+            expect(openOrUpdatePullRequestB).not.toHaveBeenCalled();
         });
 
         it("labels the implicit root component as '<root>' in log output", async () => {
@@ -345,7 +389,7 @@ describe("ManifestRunner", () => {
             expect(result).not.toBeNull();
 
             vi.mocked(Manifest.forComponent).mockReturnValue({
-                prepare: vi.fn().mockRejectedValue(new Error("boom")),
+                computeCandidate: vi.fn().mockRejectedValue(new Error("boom")),
             } as unknown as Manifest);
             vi.spyOn(logger, "error");
 

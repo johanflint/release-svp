@@ -3,7 +3,7 @@ import init from "@rainbowatcher/toml-edit-js";
 import { MigrationOptions } from "./determineReleaseContext";
 import { Github } from "./github";
 import { logger, Logger, logger as defaultLogger } from "./logger";
-import { Manifest } from "./manifest";
+import { ComponentCandidate, Manifest } from "./manifest";
 import { ComponentConfig, ManifestConfigError, MigrationConfig, parseManifestConfig, ResolvedManifestConfig } from "./manifestConfig";
 import { Repository } from "./repository";
 import { Version } from "./version";
@@ -39,20 +39,50 @@ export class ManifestRunner {
 
     // Returns `false` if any component failed to prepare, so the caller (e.g. the CLI entrypoint) can reflect
     // that in the process exit status, while still isolating each component's failure from the others below.
+    //
+    // Runs in two phases so that every component's candidate (version, changelog, file updates) is known before
+    // any of them touch GitHub's pull request state — see `detectDuplicateUpdatePaths` for why: two components
+    // whose `updates` target the same file path would silently overwrite each other if combined later (see
+    // Github.buildChangeSet, which keys updates by path), so that's checked globally, across every component,
+    // before any pull request is opened or updated.
     async prepare(): Promise<boolean> {
         const allComponentPaths = this.components.map(component => component.path);
         let allSucceeded = true;
+
+        const candidates: { component: ComponentConfig; manifest: Manifest; candidate: ComponentCandidate }[] = [];
         for (const component of this.components) {
             const label = componentLabel(component);
             logger.info(`--- Preparing release for component '${label}' ---`);
             try {
-                await Manifest.forComponent(this.github, this.repository, this.targetBranch, component.component, component.path, allComponentPaths, migrationOptionsFor(component, this.migration))
-                    .prepare(component.releaseType);
+                const manifest = Manifest.forComponent(this.github, this.repository, this.targetBranch, component.component, component.path, allComponentPaths, migrationOptionsFor(component, this.migration));
+                const candidate = await manifest.computeCandidate(component.releaseType);
+                if (candidate) {
+                    candidates.push({ component, manifest, candidate });
+                }
             } catch (e) {
                 logger.error(`Failed to prepare release for component '${label}'`, e);
                 allSucceeded = false;
             }
         }
+
+        const collisions = detectDuplicateUpdatePaths(candidates);
+        if (collisions.length > 0) {
+            for (const collision of collisions) {
+                logger.error(`Update path collision: '${collision.path}' would be written by multiple components [${collision.componentNames.join(", ")}] — refusing to prepare any release this run, since combining them would let one component's changes silently overwrite another's`);
+            }
+            return false;
+        }
+
+        for (const { component, manifest, candidate } of candidates) {
+            const label = componentLabel(component);
+            try {
+                await manifest.openOrUpdatePullRequest(candidate);
+            } catch (e) {
+                logger.error(`Failed to prepare release for component '${label}'`, e);
+                allSucceeded = false;
+            }
+        }
+
         return allSucceeded;
     }
 
@@ -155,6 +185,28 @@ export class ManifestRunner {
 
 function componentLabel(component: ComponentConfig): string {
     return component.component || "<root>";
+}
+
+// Detects file paths that would be written by more than one component's candidate. Github.buildChangeSet keys
+// updates by path in a single Map, so if two components' `Update[]`s both target the same path — e.g. a shared
+// root-level file two "root-ish" components both think they own — one would silently clobber the other were
+// their updates ever combined (e.g. into one pull request). Returns one entry per colliding path, listing every
+// component that targets it, so the caller can report all of them at once rather than failing on the first hit.
+function detectDuplicateUpdatePaths(
+    candidates: readonly { component: ComponentConfig; candidate: ComponentCandidate }[],
+): { path: string; componentNames: string[] }[] {
+    const componentNamesByPath = new Map<string, string[]>();
+    for (const { component, candidate } of candidates) {
+        for (const update of candidate.updates) {
+            const componentNames = componentNamesByPath.get(update.path) ?? [];
+            componentNames.push(componentLabel(component));
+            componentNamesByPath.set(update.path, componentNames);
+        }
+    }
+
+    return Array.from(componentNamesByPath.entries())
+        .filter(([, componentNames]) => componentNames.length > 1)
+        .map(([path, componentNames]) => ({ path, componentNames }));
 }
 
 // Translates the (path-agnostic) migration config into the per-component MigrationOptions determineReleaseContext
