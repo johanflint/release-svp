@@ -78,6 +78,12 @@ describe("parseManifestConfig", () => {
         }))).toThrow(/'component' must only contain letters, digits/);
     });
 
+    it("throws when 'component' is the reserved name 'combined'", () => {
+        expect(() => parseManifestConfig(JSON.stringify({
+            components: [{ path: "b", component: "combined", releaseType: "rust" }],
+        }))).toThrow(/'combined' is a reserved component name/);
+    });
+
     it("throws when a component path is absolute", () => {
         expect(() => parseManifestConfig(JSON.stringify({
             components: [{ path: "/etc", component: "project-a", releaseType: "rust" }],
@@ -239,6 +245,97 @@ describe("parseManifestConfig", () => {
                 components: baseComponents,
                 migration: { cutoverCommit: "abcdef0123456789abcdef0123456789abcdef01", bootstrapVersions: { "project-a": "0.1.0" } },
             }))).toThrow(/'migration\.bootstrapVersions' is missing a starting version for component 'project-b'/);
+        });
+    });
+
+    describe("separatePullRequests", () => {
+        const baseComponents = [
+            { path: "a/something", component: "project-a", releaseType: "rust" },
+        ];
+
+        it("is undefined when absent", () => {
+            const config = parseManifestConfig(JSON.stringify({ components: baseComponents }));
+            expect(config.separatePullRequests).toBeUndefined();
+        });
+
+        it("parses 'true'", () => {
+            const config = parseManifestConfig(JSON.stringify({ components: baseComponents, separatePullRequests: true }));
+            expect(config.separatePullRequests).toBe(true);
+        });
+
+        it("parses 'false'", () => {
+            const config = parseManifestConfig(JSON.stringify({ components: baseComponents, separatePullRequests: false }));
+            expect(config.separatePullRequests).toBe(false);
+        });
+
+        it("throws when not a boolean", () => {
+            expect(() => parseManifestConfig(JSON.stringify({
+                components: baseComponents,
+                separatePullRequests: "true",
+            }))).toThrow(/'separatePullRequests' must be a boolean/);
+        });
+    });
+
+    describe("releaseGroup", () => {
+        it("is undefined when absent", () => {
+            const config = parseManifestConfig(JSON.stringify({
+                components: [{ path: "a", component: "project-a", releaseType: "rust" }],
+            }));
+            expect(config.components[0].releaseGroup).toBeUndefined();
+        });
+
+        it("parses a valid group name", () => {
+            const config = parseManifestConfig(JSON.stringify({
+                components: [
+                    { path: "a", component: "ios-client", releaseType: "rust", releaseGroup: "product-a" },
+                    { path: "b", component: "android-client", releaseType: "rust", releaseGroup: "product-a" },
+                ],
+            }));
+            expect(config.components[0].releaseGroup).toBe("product-a");
+            expect(config.components[1].releaseGroup).toBe("product-a");
+        });
+
+        it("throws when present but empty", () => {
+            expect(() => parseManifestConfig(JSON.stringify({
+                components: [{ path: "a", component: "project-a", releaseType: "rust", releaseGroup: "" }],
+            }))).toThrow(/'releaseGroup' must be a non-empty string/);
+        });
+
+        it("throws when it contains invalid characters", () => {
+            expect(() => parseManifestConfig(JSON.stringify({
+                components: [{ path: "a", component: "project-a", releaseType: "rust", releaseGroup: "product a" }],
+            }))).toThrow(/'releaseGroup' must only contain letters, digits/);
+        });
+
+        it("throws when it matches a configured component's name", () => {
+            expect(() => parseManifestConfig(JSON.stringify({
+                components: [
+                    { path: "a", component: "project-a", releaseType: "rust", releaseGroup: "project-b" },
+                    { path: "b", component: "project-b", releaseType: "rust" },
+                ],
+            }))).toThrow(/'releaseGroup' value 'project-b' \(on component 'project-a'\) must not match a configured component name/);
+        });
+
+        it("throws when combined with 'separatePullRequests: true'", () => {
+            expect(() => parseManifestConfig(JSON.stringify({
+                components: [
+                    { path: "a", component: "ios-client", releaseType: "rust", releaseGroup: "product-a" },
+                    { path: "b", component: "android-client", releaseType: "rust", releaseGroup: "product-a" },
+                ],
+                separatePullRequests: true,
+            }))).toThrow(/'separatePullRequests: true' cannot be combined with 'releaseGroup'/);
+        });
+
+        it("does not throw when combined with 'separatePullRequests: false' — only 'true' is exclusive", () => {
+            const config = parseManifestConfig(JSON.stringify({
+                components: [
+                    { path: "a", component: "ios-client", releaseType: "rust", releaseGroup: "product-a" },
+                    { path: "b", component: "android-client", releaseType: "rust", releaseGroup: "product-a" },
+                ],
+                separatePullRequests: false,
+            }));
+            expect(config.separatePullRequests).toBe(false);
+            expect(config.components[0].releaseGroup).toBe("product-a");
         });
     });
 });

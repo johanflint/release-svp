@@ -12,6 +12,7 @@ describe("determineReleases", () => {
     const options: ReleaseOptions = {
         releaseBranchName: "release-svp--branches-main",
         labelPending: "autorelease: pending",
+        componentName: "",
     };
 
     vi.spyOn(github, "tagIterator").mockImplementation(async function* (): AsyncGenerator<Tag> {
@@ -66,6 +67,37 @@ describe("determineReleases", () => {
 
             const result = await determineReleases(github, "main", options);
             expect(result.length).toBe(0);
+        });
+
+        it("ignores a pull request whose branch/label matches but has no release notes section for this component", async () => {
+            // Regression test: once a pull request can bundle several components' notes together (combined
+            // release pull requests), matching this component's own branch/label isn't enough proof that this
+            // component is (still) a member of it -- e.g. it may have already been released and dropped from
+            // the body, or belong to a different release group that happens to reuse the branch/label.
+            vi.spyOn(github, "pullRequestIterator").mockImplementation(async function* () {
+                yield {
+                    ...defaultPullRequest,
+                    body: createPullRequestBody([{ componentName: "some-other-component", notes: "## v0.1.0\n\n- Release notes" }]),
+                }
+            });
+
+            const result = await determineReleases(github, "main", options);
+            expect(result.length).toBe(0);
+        });
+
+        it("returns a release for the matching component's own section in a pull request covering multiple components", async () => {
+            vi.spyOn(github, "pullRequestIterator").mockImplementation(async function* () {
+                yield {
+                    ...defaultPullRequest,
+                    body: createPullRequestBody([
+                        { componentName: "", notes: "## v0.1.0\n\n- Release notes" },
+                        { componentName: "some-other-component", notes: "## v2.0.0\n\n- Other notes" },
+                    ]),
+                }
+            });
+
+            const result = await determineReleases(github, "main", options);
+            expect(result).toEqual([expectedRelease]);
         });
 
         it("ignores pull requests whose branch name only has the release branch name as a prefix", async () => {
@@ -173,7 +205,7 @@ const defaultPullRequest: PullRequest = {
     sha: "sha",
     number: 1,
     title: "Title",
-    body: createPullRequestBody("## v0.1.0\n\n- Release notes"),
+    body: createPullRequestBody([{ componentName: "", notes: "## v0.1.0\n\n- Release notes" }]),
     permalink: "permalink",
     headBranchName: "release-svp--branches-main",
     baseBranchName: "main",
