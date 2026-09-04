@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { PullRequest } from "../src/commit";
 import { createPullRequestBody } from "../src/pullRequestBody";
-import { buildReleaseForComponent } from "../src/release";
+import { buildReleaseForComponent, pullRequestCoversComponent } from "../src/release";
 
 describe("buildReleaseForComponent", () => {
     const pullRequest: PullRequest = {
@@ -99,6 +99,47 @@ This pull request was generated with [Release SVP](https://github.com/johanflint
             expect(release?.tag).toBe("v1.2.3");
             expect(release?.notes).toBe(changelog.trim());
         });
+    });
+});
+
+describe("pullRequestCoversComponent", () => {
+    it("returns true for a legacy body with no component markers at all", () => {
+        // Legacy, pre-combined-PR-format bodies always cover the single component determineReleases already
+        // matched by branch/label — see release.ts for the full rationale.
+        const legacyBody = `:bowtie: I have created a release
+---
+
+
+${changelog}
+
+---
+This pull request was generated with [Release SVP](https://github.com/johanflint/release-svp).`;
+
+        expect(pullRequestCoversComponent(legacyBody, "any-component-name")).toBe(true);
+    });
+
+    it("returns true for a body that cannot be parsed at all", () => {
+        // Deliberately permissive: parsing failures are diagnosed and logged by buildReleaseForComponent instead,
+        // not silently swallowed here as "doesn't cover this component".
+        expect(pullRequestCoversComponent("My release", "any-component-name")).toBe(true);
+    });
+
+    it("returns true when the body has a marked section for the requested component", () => {
+        const body = createPullRequestBody([
+            { componentName: "ios-client", notes: changelog },
+            { componentName: "android-client", notes: changelogAndroid },
+        ]);
+
+        expect(pullRequestCoversComponent(body, "ios-client")).toBe(true);
+    });
+
+    it("returns false when the body has marked sections but none for the requested component", () => {
+        const body = createPullRequestBody([
+            { componentName: "ios-client", notes: changelog },
+            { componentName: "android-client", notes: changelogAndroid },
+        ]);
+
+        expect(pullRequestCoversComponent(body, "product-b")).toBe(false);
     });
 });
 

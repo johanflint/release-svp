@@ -588,6 +588,125 @@ describe("ManifestRunner", () => {
                 expect(logger.error).toHaveBeenCalledWith(expect.stringContaining("already tracked by pull request #3"));
                 expect(createPullRequest).not.toHaveBeenCalled();
             });
+
+            it("opens a combined pull request titled after the releaseGroup for a named group, end-to-end", async () => {
+                const pullRequestIterator = vi.fn().mockImplementation(async function* () {});
+                const createPullRequest = vi.fn().mockResolvedValue({ number: 42 });
+                createGithubMock({
+                    retrieveFileContents: vi.fn().mockResolvedValue({
+                        parsedContent: JSON.stringify({
+                            components: [
+                                { path: "ios", component: "ios-client", releaseType: "rust", releaseGroup: "mobile" },
+                                { path: "android", component: "android-client", releaseType: "rust", releaseGroup: "mobile" },
+                            ],
+                        }),
+                    }),
+                    pullRequestIterator,
+                    createPullRequest,
+                });
+
+                const result = await ManifestRunner.create("owner/repo", token, undefined, logger);
+                expect(result).not.toBeNull();
+
+                vi.mocked(Manifest.forComponent)
+                    .mockReturnValueOnce({ computeCandidate: vi.fn().mockResolvedValue(candidateFor("ios-client", "ios/version.txt")) } as unknown as Manifest)
+                    .mockReturnValueOnce({ computeCandidate: vi.fn().mockResolvedValue(candidateFor("android-client", "android/version.txt")) } as unknown as Manifest);
+
+                await expect(result!.prepare()).resolves.toBe(true);
+
+                expect(createPullRequest).toHaveBeenCalledExactlyOnceWith(
+                    expect.objectContaining({
+                        title: "Release mobile",
+                        headBranchName: "release-svp--branches-main--mobile",
+                        baseBranchName: "main",
+                        labels: ["autorelease: pending (ios-client)", "autorelease: pending (android-client)"],
+                    }),
+                    "Release mobile",
+                    [
+                        { path: "ios/version.txt", createIfMissing: true, updater: expect.anything() },
+                        { path: "android/version.txt", createIfMissing: true, updater: expect.anything() },
+                    ],
+                );
+            });
+
+            it("handles a combined group and an ungrouped singleton independently within the same run", async () => {
+                const pullRequestIterator = vi.fn().mockImplementation(async function* () {});
+                const createPullRequest = vi.fn().mockResolvedValue({ number: 42 });
+                const openOrUpdatePullRequestBackend = vi.fn().mockResolvedValue(undefined);
+                createGithubMock({
+                    retrieveFileContents: vi.fn().mockResolvedValue({
+                        parsedContent: JSON.stringify({
+                            components: [
+                                { path: "ios", component: "ios-client", releaseType: "rust", releaseGroup: "mobile" },
+                                { path: "android", component: "android-client", releaseType: "rust", releaseGroup: "mobile" },
+                                { path: "backend", component: "backend", releaseType: "rust" },
+                            ],
+                        }),
+                    }),
+                    pullRequestIterator,
+                    createPullRequest,
+                });
+
+                const result = await ManifestRunner.create("owner/repo", token, undefined, logger);
+                expect(result).not.toBeNull();
+
+                vi.mocked(Manifest.forComponent)
+                    .mockReturnValueOnce({ computeCandidate: vi.fn().mockResolvedValue(candidateFor("ios-client", "ios/version.txt")) } as unknown as Manifest)
+                    .mockReturnValueOnce({ computeCandidate: vi.fn().mockResolvedValue(candidateFor("android-client", "android/version.txt")) } as unknown as Manifest)
+                    .mockReturnValueOnce({
+                        computeCandidate: vi.fn().mockResolvedValue(candidateFor("backend", "backend/version.txt")),
+                        openOrUpdatePullRequest: openOrUpdatePullRequestBackend,
+                    } as unknown as Manifest);
+
+                await expect(result!.prepare()).resolves.toBe(true);
+
+                // The mobile group gets its own combined pull request...
+                expect(createPullRequest).toHaveBeenCalledExactlyOnceWith(
+                    expect.objectContaining({ title: "Release mobile", headBranchName: "release-svp--branches-main--mobile" }),
+                    "Release mobile",
+                    expect.anything(),
+                );
+                // ...while the ungrouped 'backend' component keeps its own independent, unchanged pull request path.
+                expect(openOrUpdatePullRequestBackend).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ componentName: "backend" }));
+            });
+
+            it("excludes a member with no candidate this run and no existing section from the combined pull request's labels and updates", async () => {
+                const pullRequestIterator = vi.fn().mockImplementation(async function* () {});
+                const createPullRequest = vi.fn().mockResolvedValue({ number: 42 });
+                createGithubMock({
+                    retrieveFileContents: vi.fn().mockResolvedValue({
+                        parsedContent: JSON.stringify({
+                            components: [
+                                { path: "a", component: "project-a", releaseType: "rust" },
+                                { path: "b", component: "project-b", releaseType: "rust" },
+                            ],
+                        }),
+                    }),
+                    pullRequestIterator,
+                    createPullRequest,
+                });
+
+                const result = await ManifestRunner.create("owner/repo", token, undefined, logger);
+                expect(result).not.toBeNull();
+
+                // project-b has never released before: no candidate this run, and (since there's no existing
+                // pull request at all) no carried-forward section either — it must not appear in the combined
+                // pull request at all.
+                vi.mocked(Manifest.forComponent)
+                    .mockReturnValueOnce({ computeCandidate: vi.fn().mockResolvedValue(candidateFor("project-a", "a/Cargo.toml")) } as unknown as Manifest)
+                    .mockReturnValueOnce({ computeCandidate: vi.fn().mockResolvedValue(undefined) } as unknown as Manifest);
+
+                await expect(result!.prepare()).resolves.toBe(true);
+
+                expect(createPullRequest).toHaveBeenCalledExactlyOnceWith(
+                    expect.objectContaining({
+                        labels: ["autorelease: pending (project-a)"],
+                        body: expect.not.stringContaining("project-b"),
+                    }),
+                    "Release repo",
+                    [{ path: "a/Cargo.toml", createIfMissing: true, updater: expect.anything() }],
+                );
+            });
         });
     });
 
