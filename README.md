@@ -4,6 +4,59 @@ A [release-please](https://github.com/googleapis/release-please)-style release a
 repository, it scans merged pull requests since the last release, builds a changelog, opens
 a "release PR" that bumps version files, and — once that PR is merged — tags the release on GitHub.
 
+## Quick start
+
+Not sure which mode applies to you? Pick one:
+
+| Your repository...                                                      | Use this                                                |
+|---------------------------------------------------------------------------|----------------------------------------------------------|
+| is a single project (one version, one changelog)                          | [Single-project mode](#single-project-mode-no-config-file) — no config file needed |
+| is a monorepo where every component should release together, as one PR    | [Multi-component mode](#multi-component-mode-release-svp-configjson), default combining behaviour |
+| is a monorepo with unrelated products that must NOT share a pull request  | Multi-component mode + [`releaseGroup`](#grouping-by-releasegroup) |
+| is a monorepo where every component must always get its own pull request  | Multi-component mode + [`separatePullRequests`](#opting-out-separatepullrequests) |
+| already has release history and is only now being split into components  | [Migrating an existing repository](#migrating-an-existing-repository-to-multiple-components) |
+
+release-svp runs as two separate CLI commands, both meant to run in CI on every push to your default branch:
+
+- `prepare` — scans merged pull requests since the last release and opens/updates the release pull request(s).
+  Safe to run on every push; it's a no-op if nothing changed.
+- `release` — checks whether a release pull request was just merged, and if so, tags the release and publishes a
+  GitHub Release. Safe to run on every push too; it's a no-op if no release pull request is pending merge.
+
+### Example: GitHub Actions workflow
+
+```yaml
+name: release
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm ci
+      - run: npm run build
+
+      # Tags + publishes a GitHub Release if the push just merged a release pull request.
+      - run: node dist/index.mjs release --repo-url ${{ github.repository }} --token ${{ secrets.GITHUB_TOKEN }}
+
+      # Opens/updates the pull request for the *next* release, reflecting anything merged since.
+      - run: node dist/index.mjs prepare --repo-url ${{ github.repository }} --token ${{ secrets.GITHUB_TOKEN }} --release-type rust
+```
+
+`--release-type` is only required for single-project mode (it's ignored, but harmless to pass, once a
+`release-svp-config.json` exists, since each component then declares its own `releaseType`). `--repo-url` takes
+`owner/repo` (e.g. `${{ github.repository }}`), not a full URL despite the name.
+
 ## Single-project mode (no config file)
 
 If the repository has no `release-svp-config.json`, release-svp treats the whole repository as a single,
