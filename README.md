@@ -61,7 +61,8 @@ has one section per component (each clearly marked, so it's still obvious what's
 ```
 
 If both components have unreleased changes, they share one pull request titled `Release <repo>`. If only one
-does, that component still gets its own pull request — nothing is held back waiting for the other.
+does, that component still gets its own pull request, titled `Release <component> v<version>` — nothing is held
+back waiting for the other.
 
 ### Grouping by `releaseGroup`
 
@@ -81,11 +82,22 @@ of any other component:
 ```
 
 Here, `ios-client` and `android-client` always share one pull request titled `Release mobile`, while `backend`
-(no `releaseGroup`) always gets its own pull request titled `Release v{version}`, regardless of whether the
-other two have changes. A `releaseGroup` with only one member behaves exactly like an ungrouped component. A
+(no `releaseGroup`) always gets its own pull request titled `Release backend v<version>`, regardless of whether
+the other two have changes. A `releaseGroup` with only one member behaves exactly like an ungrouped component. A
 component without `releaseGroup` is never folded into another component's group, nor into the default "everyone
 with changes" bundle above — once any component in the repository declares a `releaseGroup`, that grouping is
 used everywhere and the "bundle everyone with changes" default no longer applies to any component.
+
+### Pull request titles
+
+A pull request's title always reflects what it actually contains, so multiple open pull requests in the same
+repository can be told apart at a glance without opening each one:
+- A single-project repository (no config file), or a config file with exactly one component: `Release v<version>`
+  — there's nothing else configured to disambiguate against.
+- A multi-component repository's own singleton pull request (a component with no `releaseGroup`, or a
+  `releaseGroup` that ends up with only one member): `Release <component> v<version>`.
+- A combined/grouped pull request (2+ components sharing one pull request): `Release <group>` — no version,
+  since each member is versioned independently.
 
 ### Opting out: `separatePullRequests`
 

@@ -1,11 +1,10 @@
-import init from "@rainbowatcher/toml-edit-js";
 import { buildChangelog } from "./changelogBuilder";
 import { PullRequest } from "./commit";
 import { pendingLabel, releaseBranchName, taggedLabel, tagPrefix } from "./componentNaming";
 import { determineReleaseContext, MigrationOptions } from "./determineReleaseContext";
 import { determineReleases } from "./determineReleases";
 import { DuplicateReleaseError, Github } from "./github";
-import { logger, Logger, logger as defaultLogger } from "./logger";
+import { logger } from "./logger";
 import { createPullRequestBody } from "./pullRequestBody";
 import { PullRequestChangelogNoteBuilder } from "./pullRequestChangelogNoteBuilder";
 import { Repository } from "./repository";
@@ -42,14 +41,6 @@ export class Manifest {
         private readonly allComponentPaths: readonly string[] = [""],
         private readonly migration?: MigrationOptions,
     ) {}
-
-    async prepare(releaseType: string) {
-        const candidate = await this.computeCandidate(releaseType);
-        if (!candidate) {
-            return;
-        }
-        await this.openOrUpdatePullRequest(candidate);
-    }
 
     // Computes what this component's next release would look like (version, changelog, file updates) without
     // touching GitHub's pull request state at all. Returns `undefined` when there's nothing to release.
@@ -94,10 +85,13 @@ export class Manifest {
 
     // Opens a new pull request for this candidate, or updates the existing one if it's already open. The only
     // GitHub-mutating half of what used to be `prepare()` — see `computeCandidate` for the pure computation.
-    async openOrUpdatePullRequest(candidate: ComponentCandidate): Promise<void> {
+    // `title` is computed by the caller (see manifestRunner.ts, `pullRequestTitle`) since it depends on
+    // repo-wide context (how many other components are configured) this per-component class has no visibility
+    // into — also reused verbatim as the commit message, matching the combined-pull-request code path.
+    async openOrUpdatePullRequest(candidate: ComponentCandidate, title: string): Promise<void> {
         const pullRequest: PullRequest = {
             number: -1,
-            title: `Release v${candidate.releaseVersion}`,
+            title,
             body: createPullRequestBody([{ componentName: this.componentName, notes: candidate.changelog }]),
             permalink: "unused",
             headBranchName: releaseBranchName(this.targetBranch, this.componentName),
@@ -106,17 +100,16 @@ export class Manifest {
         }
 
         const existingPullRequest = await this.findExistingPullRequest(pullRequest, this.github);
-        const commitMessage = `Release v${candidate.releaseVersion}`;
         if (existingPullRequest?.body === pullRequest.body && existingPullRequest.title === pullRequest.title) {
             logger.info(`Done, pull request https://github.com/${this.repository.owner}/${this.repository.repo}/pull/${existingPullRequest.number} remained the same`);
             return;
         }
 
         if (existingPullRequest) {
-            const updatedPullRequest = await this.github.updatePullRequest(pullRequest, commitMessage, [...candidate.updates]);
+            const updatedPullRequest = await this.github.updatePullRequest(pullRequest, title, [...candidate.updates]);
             logger.info(`Updated pull request https://github.com/${this.repository.owner}/${this.repository.repo}/pull/${updatedPullRequest.number}`);
         } else {
-            const createdPullRequest = await this.github.createPullRequest(pullRequest, commitMessage, [...candidate.updates]);
+            const createdPullRequest = await this.github.createPullRequest(pullRequest, title, [...candidate.updates]);
             logger.info(`Created pull request https://github.com/${this.repository.owner}/${this.repository.repo}/pull/${createdPullRequest.number}`);
         }
     }
@@ -170,21 +163,6 @@ export class Manifest {
         console.info(`✅️ Created ${releases.length} release(s) 🌷️`);
     }
 
-    static async create(repositoryUrl: string, githubToken: string, logger: Logger = defaultLogger): Promise<Manifest | null> {
-        const repository = parseGitHubUrl(repositoryUrl);
-        if (!repository.owner || !repository.repo) {
-            logger.error(`Invalid GitHub repository url '${repositoryUrl}', expected 'repository/owner' format`);
-            return null;
-        }
-
-        // Initialize wasm for the TOML library
-        await init();
-
-        const github = new Github(repository, githubToken, logger);
-        const targetBranch = await github.retrieveDefaultBranch();
-        return new Manifest(github, repository, targetBranch);
-    }
-
     // Builds a Manifest for a single component, reusing an already-configured Github client, repository and
     // target branch. Used by ManifestRunner so that resolving the repository/branch/wasm init happens once per
     // run, regardless of how many components it processes. `componentName`/`componentPath` default to "" and
@@ -200,13 +178,5 @@ export class Manifest {
         migration?: MigrationOptions,
     ): Manifest {
         return new Manifest(github, repository, targetBranch, componentName, componentPath, allComponentPaths, migration);
-    }
-}
-
-function parseGitHubUrl(url: string): Repository {
-    const match = /^([\w-.]+)\/([\w-.]+)$/.exec(url)
-    return {
-        owner: match?.[1] ?? "",
-        repo: match?.[2]?? "",
     }
 }

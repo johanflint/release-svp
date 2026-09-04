@@ -5,6 +5,7 @@ import { ComponentSection, extractComponentSections, parsePullRequestBody } from
 import { pullRequestCoversComponent } from "./release";
 import { ReleaseUnit } from "./releaseUnit";
 import { Update } from "./update";
+import { Version } from "./version";
 
 // The result of merging a release unit's currently active candidates with whatever its existing (still open)
 // pull request already contains — see `buildCombinedSections`. `updates` is the flattened, ready-to-write file
@@ -61,11 +62,36 @@ export function buildCombinedSections(
     return { sections, updates };
 }
 
-// Title for a release unit's shared pull request. Only ever called for a multi-member unit — a singleton unit
-// (today's one-pull-request-per-component behaviour) keeps its existing, unchanged `Release v{version}` title
-// (see manifest.ts, `openOrUpdatePullRequest`).
-export function combinedTitle(unit: ReleaseUnit, repositoryName: string): string {
-    return unit.groupId === DEFAULT_RELEASE_GROUP_ID ? `Release ${repositoryName}` : `Release ${unit.groupId}`;
+// Title for a release unit's pull request. Covers both the singleton case (today's one-pull-request-per-
+// component behaviour) and the combined/grouped case, since which applies depends on repo-wide context (how
+// many components are configured in total) that neither `Manifest` nor `ManifestRunner`'s per-unit dispatch has
+// any reason to duplicate — see README.md ("Combined release pull requests"):
+//  - a genuine multi-member unit (2+ components sharing this pull request): the group name — the repository
+//    name for the implicit default "everyone with changes" group, or the explicit `releaseGroup` value
+//    otherwise — with no version, since each member is versioned independently. `releaseVersion` is ignored.
+//  - a singleton unit (exactly one member), when 2+ components are configured in total: the member's own
+//    component name plus its version, so that multiple singleton pull requests in the same repository can still
+//    be told apart from their titles alone. `releaseVersion` is required here.
+//  - a singleton unit when only one component is configured in total (true single-project mode, or a one-entry
+//    config file): just the version — there's nothing else configured to disambiguate against. `releaseVersion`
+//    is required here too.
+export function pullRequestTitle(options: {
+    readonly unit: ReleaseUnit;
+    readonly totalComponentCount: number;
+    readonly repositoryName: string;
+    readonly releaseVersion?: Version;
+}): string {
+    const { unit, totalComponentCount, repositoryName, releaseVersion } = options;
+
+    if (unit.members.length > 1) {
+        return unit.groupId === DEFAULT_RELEASE_GROUP_ID ? `Release ${repositoryName}` : `Release ${unit.groupId}`;
+    }
+
+    if (totalComponentCount <= 1) {
+        return `Release v${releaseVersion}`;
+    }
+
+    return `Release ${unit.members[0].component} v${releaseVersion}`;
 }
 
 // Finds an already-open pull request (on some OTHER branch) that already appears to be tracking `componentName`,

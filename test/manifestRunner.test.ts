@@ -401,6 +401,64 @@ describe("ManifestRunner", () => {
             expect(logger.error).toHaveBeenCalledWith("Failed to prepare release for component '<root>'", expect.any(Error));
         });
 
+        it("titles a single-project (no config) pull request with just the version, but a multi-component singleton's pull request with its component name too", async () => {
+            // Single-project mode: only one (implicit root) component configured in total, so there's nothing to
+            // disambiguate against.
+            createGithubMock({
+                retrieveFileContents: vi.fn().mockRejectedValue(new FileNotFoundError("release-svp-config.json")),
+                pullRequestIterator: vi.fn().mockImplementation(async function* () {}),
+            });
+
+            const singleProjectResult = await ManifestRunner.create("owner/repo", token, "rust", logger);
+            expect(singleProjectResult).not.toBeNull();
+
+            const openOrUpdatePullRequestRoot = vi.fn().mockResolvedValue(undefined);
+            vi.mocked(Manifest.forComponent).mockReturnValue({
+                computeCandidate: vi.fn().mockResolvedValue({ componentName: "", releaseVersion: Version.parse("1.0.0"), changelog: "", updates: [] }),
+                openOrUpdatePullRequest: openOrUpdatePullRequestRoot,
+            } as unknown as Manifest);
+
+            await singleProjectResult!.prepare();
+
+            expect(openOrUpdatePullRequestRoot).toHaveBeenCalledExactlyOnceWith(expect.anything(), "Release v1.0.0");
+
+            // Multi-component mode, no releaseGroup at all, separatePullRequests keeps each its own singleton:
+            // 2+ components are configured in total, so each singleton pull request's title includes its own
+            // component name to tell them apart.
+            createGithubMock({
+                retrieveFileContents: vi.fn().mockResolvedValue({
+                    parsedContent: JSON.stringify({
+                        components: [
+                            { path: "a", component: "project-a", releaseType: "rust" },
+                            { path: "b", component: "project-b", releaseType: "rust" },
+                        ],
+                        separatePullRequests: true,
+                    }),
+                }),
+                pullRequestIterator: vi.fn().mockImplementation(async function* () {}),
+            });
+
+            const multiComponentResult = await ManifestRunner.create("owner/repo", token, undefined, logger);
+            expect(multiComponentResult).not.toBeNull();
+
+            const openOrUpdatePullRequestA = vi.fn().mockResolvedValue(undefined);
+            const openOrUpdatePullRequestB = vi.fn().mockResolvedValue(undefined);
+            vi.mocked(Manifest.forComponent)
+                .mockReturnValueOnce({
+                    computeCandidate: vi.fn().mockResolvedValue({ componentName: "project-a", releaseVersion: Version.parse("1.0.0"), changelog: "", updates: [] }),
+                    openOrUpdatePullRequest: openOrUpdatePullRequestA,
+                } as unknown as Manifest)
+                .mockReturnValueOnce({
+                    computeCandidate: vi.fn().mockResolvedValue({ componentName: "project-b", releaseVersion: Version.parse("2.0.0"), changelog: "", updates: [] }),
+                    openOrUpdatePullRequest: openOrUpdatePullRequestB,
+                } as unknown as Manifest);
+
+            await multiComponentResult!.prepare();
+
+            expect(openOrUpdatePullRequestA).toHaveBeenCalledExactlyOnceWith(expect.anything(), "Release project-a v1.0.0");
+            expect(openOrUpdatePullRequestB).toHaveBeenCalledExactlyOnceWith(expect.anything(), "Release project-b v2.0.0");
+        });
+
         describe("combined pull requests", () => {
             function candidateFor(componentName: string, path: string) {
                 return {
@@ -667,7 +725,7 @@ describe("ManifestRunner", () => {
                     expect.anything(),
                 );
                 // ...while the ungrouped 'backend' component keeps its own independent, unchanged pull request path.
-                expect(openOrUpdatePullRequestBackend).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ componentName: "backend" }));
+                expect(openOrUpdatePullRequestBackend).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ componentName: "backend" }), "Release backend v1.0.0");
             });
 
             it("excludes a member with no candidate this run and no existing section from the combined pull request's labels and updates", async () => {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { PullRequest } from "../src/commit";
-import { buildCombinedSections, combinedTitle, findConflictingOpenPullRequest } from "../src/combinedPullRequest";
+import { buildCombinedSections, findConflictingOpenPullRequest, pullRequestTitle } from "../src/combinedPullRequest";
 import { ComponentCandidate } from "../src/manifest";
 import { ComponentConfig } from "../src/manifestConfig";
 import { createPullRequestBody } from "../src/pullRequestBody";
@@ -93,15 +93,25 @@ describe("buildCombinedSections", () => {
     });
 });
 
-describe("combinedTitle", () => {
+describe("pullRequestTitle", () => {
     it("uses the repository name for the implicit default group", () => {
-        const unit: ReleaseUnit = { groupId: "combined", branchName: "release-svp--branches-main--combined", members: [] };
-        expect(combinedTitle(unit, "repo")).toBe("Release repo");
+        const unit: ReleaseUnit = { groupId: "combined", branchName: "release-svp--branches-main--combined", members: [component("ios-client"), component("android-client")] };
+        expect(pullRequestTitle({ unit, totalComponentCount: 2, repositoryName: "repo" })).toBe("Release repo");
     });
 
     it("uses the group id for an explicit release group", () => {
-        const unit: ReleaseUnit = { groupId: "product-a", branchName: "release-svp--branches-main--product-a", members: [] };
-        expect(combinedTitle(unit, "repo")).toBe("Release product-a");
+        const unit: ReleaseUnit = { groupId: "product-a", branchName: "release-svp--branches-main--product-a", members: [component("ios-client"), component("android-client")] };
+        expect(pullRequestTitle({ unit, totalComponentCount: 2, repositoryName: "repo" })).toBe("Release product-a");
+    });
+
+    it("uses just the version for a singleton unit when only one component is configured in total", () => {
+        const unit: ReleaseUnit = { branchName: "release-svp--branches-main", members: [component("")] };
+        expect(pullRequestTitle({ unit, totalComponentCount: 1, repositoryName: "repo", releaseVersion: Version.parse("1.2.3") })).toBe("Release v1.2.3");
+    });
+
+    it("includes the component name for a singleton unit when multiple components are configured in total", () => {
+        const unit: ReleaseUnit = { branchName: "release-svp--branches-main--backend", members: [component("backend")] };
+        expect(pullRequestTitle({ unit, totalComponentCount: 2, repositoryName: "repo", releaseVersion: Version.parse("1.2.3") })).toBe("Release backend v1.2.3");
     });
 });
 

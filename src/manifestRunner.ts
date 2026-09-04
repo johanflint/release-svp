@@ -1,7 +1,7 @@
 import { FileNotFoundError } from "@google-automations/git-file-utils";
 import init from "@rainbowatcher/toml-edit-js";
 import { PullRequest } from "./commit";
-import { buildCombinedSections, combinedTitle, findConflictingOpenPullRequest } from "./combinedPullRequest";
+import { buildCombinedSections, findConflictingOpenPullRequest, pullRequestTitle } from "./combinedPullRequest";
 import { pendingLabel } from "./componentNaming";
 import { MigrationOptions } from "./determineReleaseContext";
 import { Github } from "./github";
@@ -108,7 +108,8 @@ export class ManifestRunner {
                     if (!candidate) {
                         continue;
                     }
-                    await manifestsByComponent.get(component.component)!.openOrUpdatePullRequest(candidate);
+                    const title = pullRequestTitle({ unit, totalComponentCount: this.components.length, repositoryName: this.repository.repo, releaseVersion: candidate.releaseVersion });
+                    await manifestsByComponent.get(component.component)!.openOrUpdatePullRequest(candidate, title);
                 } else {
                     await this.openOrUpdateCombinedPullRequest(unit, candidatesByComponent, openPullRequests);
                 }
@@ -169,7 +170,7 @@ export class ManifestRunner {
         }
 
         const labels = result.sections.map(section => pendingLabel(section.componentName));
-        const title = combinedTitle(unit, this.repository.repo);
+        const title = pullRequestTitle({ unit, totalComponentCount: this.components.length, repositoryName: this.repository.repo });
         const body = createPullRequestBody(result.sections);
 
         const pullRequest: PullRequest = {
