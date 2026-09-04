@@ -4,21 +4,26 @@ import { ComponentCandidate } from "./manifest";
 import { ComponentSection, extractComponentSections, parsePullRequestBody } from "./pullRequestBody";
 import { pullRequestCoversComponent } from "./release";
 import { ReleaseUnit } from "./releaseUnit";
+import { Update } from "./update";
 
 // The result of merging a release unit's currently active candidates with whatever its existing (still open)
-// pull request already contains — see `buildCombinedSections`.
+// pull request already contains — see `buildCombinedSections`. `updates` is the flattened, ready-to-write file
+// changes for every member with a FRESH candidate this run (never for a carried-forward member — its file
+// changes are already committed on the branch from a previous run) — computed here, alongside `sections`, so
+// callers never need to re-derive which members are "fresh" themselves.
 export type CombinedSectionsResult =
-    | { readonly sections: readonly ComponentSection[] }
+    | { readonly sections: readonly ComponentSection[]; readonly updates: readonly Update[] }
     // Every component name in `orphaned` has a section in the existing pull request but is no longer a member of
     // this unit (see `buildCombinedSections`) — the caller must fail loudly rather than silently drop it.
     | { readonly orphaned: readonly string[] };
 
-// Builds the merged set of per-component sections for a release unit's shared pull request, combining:
-//  - a fresh section for every member that has a candidate in THIS run, and
+// Builds the merged set of per-component sections (and their corresponding file updates) for a release unit's
+// shared pull request, combining:
+//  - a fresh section (and its updates) for every member that has a candidate in THIS run, and
 //  - an unchanged, carried-forward section for every member that has no candidate this run (nothing new to
 //    release for it) but already has one in the existing pull request — this is "frozen membership": a member
 //    that simply has no new commits yet must never silently disappear from an already-open combined pull
-//    request.
+//    request. A carried-forward member contributes no updates — its file changes are already on the branch.
 // Fails (returns `orphaned`) when the existing pull request has a section for a component that isn't a member of
 // this unit at all anymore (e.g. removed from the config, or moved to a different release group) — that case
 // can't be resolved by carrying anything forward, and silently dropping it would look like data loss.
@@ -32,11 +37,13 @@ export function buildCombinedSections(
         : [];
 
     const sections: ComponentSection[] = [];
+    const updates: Update[] = [];
     const handled = new Set<string>();
     for (const component of unit.members) {
         const candidate = activeCandidatesByComponent.get(component.component);
         if (candidate) {
             sections.push({ componentName: component.component, notes: candidate.changelog });
+            updates.push(...candidate.updates);
         } else {
             const carriedForward = existingSections.find(section => section.componentName === component.component);
             if (carriedForward) {
@@ -51,7 +58,7 @@ export function buildCombinedSections(
         return { orphaned };
     }
 
-    return { sections };
+    return { sections, updates };
 }
 
 // Title for a release unit's shared pull request. Only ever called for a multi-member unit — a singleton unit

@@ -11,8 +11,8 @@ function component(name: string, releaseGroup?: string): ComponentConfig {
     return { path: name, component: name, releaseType: "node", releaseGroup };
 }
 
-function candidate(componentName: string, version: string, changelog: string): ComponentCandidate {
-    return { componentName, releaseVersion: Version.parse(version), changelog, updates: [] };
+function candidate(componentName: string, version: string, changelog: string, updates: ComponentCandidate["updates"] = []): ComponentCandidate {
+    return { componentName, releaseVersion: Version.parse(version), changelog, updates };
 }
 
 function pullRequestWithBody(body: string): PullRequest {
@@ -33,10 +33,12 @@ describe("buildCombinedSections", () => {
     const android = component("android-client", "product-a");
     const unit: ReleaseUnit = { groupId: "product-a", branchName: "release-svp--branches-main--product-a", members: [ios, android] };
 
-    it("builds a fresh section for every member with a candidate when there is no existing pull request", () => {
+    it("builds a fresh section (and flattens updates) for every member with a candidate when there is no existing pull request", () => {
+        const iosUpdate = { path: "ios/version.txt", createIfMissing: true, updater: { updateContent: () => "" } };
+        const androidUpdate = { path: "android/version.txt", createIfMissing: true, updater: { updateContent: () => "" } };
         const candidates = new Map([
-            ["ios-client", candidate("ios-client", "1.0.0", "## v1.0.0\n\n- iOS notes")],
-            ["android-client", candidate("android-client", "2.0.0", "## v2.0.0\n\n- Android notes")],
+            ["ios-client", candidate("ios-client", "1.0.0", "## v1.0.0\n\n- iOS notes", [iosUpdate])],
+            ["android-client", candidate("android-client", "2.0.0", "## v2.0.0\n\n- Android notes", [androidUpdate])],
         ]);
 
         const result = buildCombinedSections(unit, candidates, undefined);
@@ -46,16 +48,18 @@ describe("buildCombinedSections", () => {
                 { componentName: "ios-client", notes: "## v1.0.0\n\n- iOS notes" },
                 { componentName: "android-client", notes: "## v2.0.0\n\n- Android notes" },
             ],
+            updates: [iosUpdate, androidUpdate],
         });
     });
 
-    it("carries forward a member's existing section unchanged when it has no candidate this run", () => {
+    it("carries forward a member's existing section unchanged when it has no candidate this run, and excludes it from updates", () => {
         const existingBody = createPullRequestBody([
             { componentName: "ios-client", notes: "## v1.0.0\n\n- iOS notes" },
             { componentName: "android-client", notes: "## v2.0.0\n\n- Android notes" },
         ]);
+        const iosUpdate = { path: "ios/version.txt", createIfMissing: true, updater: { updateContent: () => "" } };
         // Only iOS has fresh, unreleased commits this run; android has none yet.
-        const candidates = new Map([["ios-client", candidate("ios-client", "1.1.0", "## v1.1.0\n\n- More iOS notes")]]);
+        const candidates = new Map([["ios-client", candidate("ios-client", "1.1.0", "## v1.1.0\n\n- More iOS notes", [iosUpdate])]]);
 
         const result = buildCombinedSections(unit, candidates, pullRequestWithBody(existingBody));
 
@@ -64,6 +68,7 @@ describe("buildCombinedSections", () => {
                 { componentName: "ios-client", notes: "## v1.1.0\n\n- More iOS notes" },
                 { componentName: "android-client", notes: "## v2.0.0\n\n- Android notes" },
             ],
+            updates: [iosUpdate],
         });
     });
 
@@ -72,7 +77,7 @@ describe("buildCombinedSections", () => {
 
         const result = buildCombinedSections(unit, candidates, undefined);
 
-        expect(result).toEqual({ sections: [{ componentName: "ios-client", notes: "## v1.0.0\n\n- iOS notes" }] });
+        expect(result).toEqual({ sections: [{ componentName: "ios-client", notes: "## v1.0.0\n\n- iOS notes" }], updates: [] });
     });
 
     it("fails with the orphaned component name(s) when the existing pull request has a section for a component that is no longer a member of this unit", () => {

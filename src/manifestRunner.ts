@@ -96,17 +96,7 @@ export class ManifestRunner {
             openPullRequests.push(pullRequest);
         }
 
-        let hasConflict = false;
-        for (const unit of units) {
-            for (const component of unit.members) {
-                const conflict = findConflictingOpenPullRequest(openPullRequests, component.component, unit.branchName, this.targetBranch);
-                if (conflict) {
-                    logger.error(`Component '${componentLabel(component)}' is already tracked by pull request #${conflict.number} (branch '${conflict.headBranchName}'), which is no longer this component's release branch ('${unit.branchName}') — merge or close pull request #${conflict.number} manually before its next run`);
-                    hasConflict = true;
-                }
-            }
-        }
-        if (hasConflict) {
+        if (this.hasConflictingOpenPullRequest(units, openPullRequests)) {
             return false;
         }
 
@@ -123,12 +113,36 @@ export class ManifestRunner {
                     await this.openOrUpdateCombinedPullRequest(unit, candidatesByComponent, openPullRequests);
                 }
             } catch (e) {
-                logger.error(`Failed to prepare release for release unit '${unit.groupId ?? unit.branchName}'`, e);
+                // Singleton units (the common case) are identified by their one member's own name here, matching
+                // the wording used everywhere else in this file; only a genuine multi-member unit is identified
+                // by its groupId, since it has no single component name of its own.
+                const unitLabel = unit.groupId ?? componentLabel(unit.members[0]);
+                logger.error(`Failed to prepare release for release unit '${unitLabel}'`, e);
                 allSucceeded = false;
             }
         }
 
         return allSucceeded;
+    }
+
+    // Phase 3 of `prepare()`: detects a component simultaneously claimed by two open pull requests — e.g. a
+    // pre-upgrade, per-component pull request left open when a component joins a release group for the first
+    // time, or a pull request left over from before a `releaseGroup` config change moved the component
+    // elsewhere. Logs one error per conflict found. Like `detectDuplicateUpdatePaths`, any conflict aborts the
+    // *entire* run rather than partially proceeding, since automatically picking one pull request over the other
+    // could discard real, unmerged release notes.
+    private hasConflictingOpenPullRequest(units: readonly ReleaseUnit[], openPullRequests: readonly PullRequest[]): boolean {
+        let hasConflict = false;
+        for (const unit of units) {
+            for (const component of unit.members) {
+                const conflict = findConflictingOpenPullRequest(openPullRequests, component.component, unit.branchName, this.targetBranch);
+                if (conflict) {
+                    logger.error(`Component '${componentLabel(component)}' is already tracked by pull request #${conflict.number} (branch '${conflict.headBranchName}'), which is no longer this component's release branch ('${unit.branchName}') — merge or close pull request #${conflict.number} manually before its next run`);
+                    hasConflict = true;
+                }
+            }
+        }
+        return hasConflict;
     }
 
     // Opens or updates the one shared pull request for a multi-member release unit — see `buildCombinedSections`
@@ -138,6 +152,12 @@ export class ManifestRunner {
         candidatesByComponent: ReadonlyMap<string, ComponentCandidate>,
         openPullRequests: readonly PullRequest[],
     ): Promise<void> {
+        // Matched by branch name alone, unlike Manifest's singleton lookup (which also requires the pending
+        // label) — deliberately so: this is exactly what lets `buildCombinedSections` detect an "orphaned"
+        // component below (one whose label no longer belongs to any current member, e.g. after a `releaseGroup`
+        // config change) instead of mistaking it for "no existing pull request" and silently opening a duplicate.
+        // Safe in practice because `unit.branchName` is always one of our own reserved, auto-generated branch
+        // names (see componentNaming.ts), never one a user would create by hand.
         const existingPullRequest = openPullRequests.find(pullRequest => pullRequest.headBranchName === unit.branchName);
         const result = buildCombinedSections(unit, candidatesByComponent, existingPullRequest);
         if ("orphaned" in result) {
@@ -148,8 +168,6 @@ export class ManifestRunner {
             return;
         }
 
-        const activeMembers = unit.members.filter(component => candidatesByComponent.has(component.component));
-        const updates = activeMembers.flatMap(component => [...candidatesByComponent.get(component.component)!.updates]);
         const labels = result.sections.map(section => pendingLabel(section.componentName));
         const title = combinedTitle(unit, this.repository.repo);
         const body = createPullRequestBody(result.sections);
@@ -170,10 +188,10 @@ export class ManifestRunner {
         }
 
         if (existingPullRequest) {
-            const updatedPullRequest = await this.github.updatePullRequest(pullRequest, title, updates);
+            const updatedPullRequest = await this.github.updatePullRequest(pullRequest, title, [...result.updates]);
             logger.info(`Updated pull request https://github.com/${this.repository.owner}/${this.repository.repo}/pull/${updatedPullRequest.number}`);
         } else {
-            const createdPullRequest = await this.github.createPullRequest(pullRequest, title, updates);
+            const createdPullRequest = await this.github.createPullRequest(pullRequest, title, [...result.updates]);
             logger.info(`Created pull request https://github.com/${this.repository.owner}/${this.repository.repo}/pull/${createdPullRequest.number}`);
         }
     }

@@ -1,11 +1,5 @@
 import { DEFAULT_RELEASE_GROUP_ID, groupReleaseBranchName, releaseBranchName } from "./componentNaming";
-import { ComponentCandidate } from "./manifest";
 import { ComponentConfig } from "./manifestConfig";
-
-export interface ReleaseUnitMember {
-    readonly component: ComponentConfig;
-    readonly candidate: ComponentCandidate;
-}
 
 // A statically-partitioned group of components that share one release pull request. Partitioning is based
 // purely on repository configuration (component list + `releaseGroup`/`separatePullRequests`), never on which
