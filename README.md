@@ -39,9 +39,81 @@ To release multiple independently-versioned components from a single repository 
   component declares `path: ""`, files that don't fall under any configured path (e.g. a top-level `README.md`)
   are excluded from every component's release detection — release-svp logs a warning when this happens, but
   does not fail the run, since it may be intentional.
-- Each component is released fully independently: a single pull request touching both `a/` and `b/` can result
-  in two separate release PRs/releases in the same cycle, each with its own changelog file, tag namespace, and
-  GitHub Release page entry.
+- Each component is versioned, changelogged and tagged fully independently: a single pull request touching both
+  `a/` and `b/` can result in two separate releases in the same cycle, each with its own changelog file, tag
+  namespace, and GitHub Release page entry. By default they share one release *pull request* — see "Combined
+  release pull requests" below for how that's controlled.
+
+## Combined release pull requests
+
+By default, when 2 or more components have unreleased changes at the same time, release-svp bundles them into
+**one shared release pull request** instead of opening one per component. Each component still gets its own,
+fully independent version bump, changelog and tag — grouping only affects the pull request itself, which now
+has one section per component (each clearly marked, so it's still obvious what's being released):
+
+```jsonc
+{
+  "components": [
+    { "component": "ios-client", "path": "ios", "releaseType": "rust" },
+    { "component": "android-client", "path": "android", "releaseType": "rust" }
+  ]
+}
+```
+
+If both components have unreleased changes, they share one pull request titled `Release <repo>`. If only one
+does, that component still gets its own pull request — nothing is held back waiting for the other.
+
+### Grouping by `releaseGroup`
+
+A monorepo can also host unrelated products (or a mix of shared and standalone parts) that shouldn't all be
+bundled together just because they happen to release at the same time. Set `releaseGroup` on a component to
+control this explicitly — components sharing the same `releaseGroup` value are bundled together, independently
+of any other component:
+
+```jsonc
+{
+  "components": [
+    { "component": "ios-client", "path": "mobile/ios", "releaseType": "rust", "releaseGroup": "mobile" },
+    { "component": "android-client", "path": "mobile/android", "releaseType": "rust", "releaseGroup": "mobile" },
+    { "component": "backend", "path": "backend", "releaseType": "rust" }
+  ]
+}
+```
+
+Here, `ios-client` and `android-client` always share one pull request titled `Release mobile`, while `backend`
+(no `releaseGroup`) always gets its own pull request titled `Release v{version}`, regardless of whether the
+other two have changes. A `releaseGroup` with only one member behaves exactly like an ungrouped component. A
+component without `releaseGroup` is never folded into another component's group, nor into the default "everyone
+with changes" bundle above — once any component in the repository declares a `releaseGroup`, that grouping is
+used everywhere and the "bundle everyone with changes" default no longer applies to any component.
+
+### Opting out: `separatePullRequests`
+
+To keep one-pull-request-per-component behaviour instead, with no bundling at all, set:
+
+```jsonc
+{ "separatePullRequests": true, "components": [ /* ... */ ] }
+```
+
+This is a repository-wide escape hatch — it's rejected by config validation if any component also declares
+`releaseGroup`, since the two would otherwise have unclear precedence. It's meaningless (ignored) for
+single-component repositories, where there's only ever one pull request either way.
+
+### Frozen membership and orphaned components
+
+Once a combined pull request is open, its set of components is "frozen": a component that simply has no new
+commits yet is carried forward unchanged in the pull request body, never silently dropped. If a component that
+already has a section in an open combined pull request is removed from the config, or moved to a different
+`releaseGroup`, the affected unit's run fails loudly instead of silently discarding its section — merge or close
+the existing pull request, or restore the component's group, before the next run.
+
+### Rolling out to an existing repository
+
+Enabling this on a repository that already has open, per-component release pull requests from before this
+feature existed is safe to do at any time: the combined pull request lives on its own, separately-named branch
+(`release-svp--branches-<target>--<group>`), which never collides with an individual component's own branch. Any
+already-open per-component pull request is simply left alone — merge or close it as usual — while future runs
+start using combined pull requests going forward.
 
 ## Migrating an existing repository to multiple components
 
