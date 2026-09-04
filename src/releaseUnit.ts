@@ -33,7 +33,10 @@ export interface ReleaseUnit {
 //    (`DEFAULT_RELEASE_GROUP_ID`).
 //  - Otherwise (some component(s) declare `releaseGroup`), components sharing the same value form one unit each;
 //    every other, ungrouped component is its own singleton unit — never silently folded into a group or into an
-//    implicit "everyone else" bucket.
+//    implicit "everyone else" bucket. A `releaseGroup` with exactly one remaining member (declared alone, or left
+//    alone after a sibling was removed from the config) is returned as a genuine singleton unit too (no `groupId`,
+//    plain branch name) — never a single-member "group" unit — so it behaves exactly like an ungrouped component
+//    (see manifestConfig.ts, `ComponentConfig.releaseGroup`) and callers never need to special-case group size.
 export function computeReleaseUnits(
     allComponents: readonly ComponentConfig[],
     targetBranch: string,
@@ -71,6 +74,16 @@ export function computeReleaseUnits(
     }
 
     for (const [groupId, members] of membersByGroup) {
+        // A releaseGroup with exactly one remaining member (declared alone, or left alone after a sibling was
+        // removed from the config) behaves like an ungrouped component (see manifestConfig.ts,
+        // `ComponentConfig.releaseGroup`) — return a genuine singleton unit (no groupId, plain branch name)
+        // rather than a single-member "group" unit, so callers never need to special-case `members.length === 1`
+        // to get the right branch name; the data is self-consistent by construction.
+        if (members.length === 1) {
+            units.push(singletonUnit(members[0], targetBranch));
+            continue;
+        }
+
         units.push({ groupId, branchName: groupReleaseBranchName(targetBranch, groupId), members });
     }
 

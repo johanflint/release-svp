@@ -71,12 +71,38 @@ describe("computeReleaseUnits", () => {
     it("supports multiple distinct releaseGroups at once", () => {
         const ios = component("ios-client", "product-a");
         const android = component("android-client", "product-a");
-        const web = component("web-client", "product-b");
-        const units = computeReleaseUnits([ios, android, web], "main", undefined);
+        const web1 = component("web-client-1", "product-b");
+        const web2 = component("web-client-2", "product-b");
+        const units = computeReleaseUnits([ios, android, web1, web2], "main", undefined);
 
         expect(units).toEqual([
             { groupId: "product-a", branchName: "release-svp--branches-main--product-a", members: [ios, android] },
-            { groupId: "product-b", branchName: "release-svp--branches-main--product-b", members: [web] },
+            { groupId: "product-b", branchName: "release-svp--branches-main--product-b", members: [web1, web2] },
+        ]);
+    });
+
+    it("returns a genuine singleton unit (no groupId, plain branch name) for a releaseGroup declared by only one component", () => {
+        const standalone = component("standalone", "solo-group");
+        const other = component("other");
+        const units = computeReleaseUnits([standalone, other], "main", undefined);
+
+        expect(units).toEqual([
+            { branchName: "release-svp--branches-main--other", members: [other] },
+            { branchName: "release-svp--branches-main--standalone", members: [standalone] },
+        ]);
+    });
+
+    it("returns a genuine singleton unit for a releaseGroup left with one member after its sibling was removed, alongside another still-grouped releaseGroup", () => {
+        // Simulates a config change: "product-a" used to have two members, now only "ios-client" declares it,
+        // while "product-b" still has two.
+        const ios = component("ios-client", "product-a");
+        const web1 = component("web-client-1", "product-b");
+        const web2 = component("web-client-2", "product-b");
+        const units = computeReleaseUnits([ios, web1, web2], "main", undefined);
+
+        expect(units).toEqual([
+            { branchName: "release-svp--branches-main--ios-client", members: [ios] },
+            { groupId: "product-b", branchName: "release-svp--branches-main--product-b", members: [web1, web2] },
         ]);
     });
 });
