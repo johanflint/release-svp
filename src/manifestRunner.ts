@@ -1,11 +1,16 @@
 import { FileNotFoundError } from "@google-automations/git-file-utils";
 import init from "@rainbowatcher/toml-edit-js";
+import { PullRequest } from "./commit";
+import { buildCombinedSections, combinedTitle, findConflictingOpenPullRequest } from "./combinedPullRequest";
+import { pendingLabel } from "./componentNaming";
 import { MigrationOptions } from "./determineReleaseContext";
 import { Github } from "./github";
 import { logger, Logger, logger as defaultLogger } from "./logger";
 import { ComponentCandidate, Manifest } from "./manifest";
 import { ComponentConfig, ManifestConfigError, MigrationConfig, parseManifestConfig, ResolvedManifestConfig } from "./manifestConfig";
+import { createPullRequestBody } from "./pullRequestBody";
 import { Repository } from "./repository";
+import { computeReleaseUnits, ReleaseUnit } from "./releaseUnit";
 import { Version } from "./version";
 
 const CONFIG_PATH = "release-svp-config.json";
@@ -35,29 +40,40 @@ export class ManifestRunner {
         private readonly targetBranch: string,
         private readonly components: readonly ComponentConfig[],
         private readonly migration?: MigrationConfig,
+        private readonly separatePullRequests?: boolean,
     ) {}
 
     // Returns `false` if any component failed to prepare, so the caller (e.g. the CLI entrypoint) can reflect
     // that in the process exit status, while still isolating each component's failure from the others below.
     //
-    // Runs in two phases so that every component's candidate (version, changelog, file updates) is known before
-    // any of them touch GitHub's pull request state — see `detectDuplicateUpdatePaths` for why: two components
-    // whose `updates` target the same file path would silently overwrite each other if combined later (see
-    // Github.buildChangeSet, which keys updates by path), so that's checked globally, across every component,
-    // before any pull request is opened or updated.
+    // Runs in phases so that every component's candidate (version, changelog, file updates) is known before any
+    // of them touch GitHub's pull request state:
+    //  1. Compute every component's candidate.
+    //  2. `detectDuplicateUpdatePaths` — see there for why two components whose `updates` target the same file
+    //     path must abort the whole run rather than risk one silently overwriting the other.
+    //  3. Partition components into release units (see releaseUnit.ts) and detect a component simultaneously
+    //     claimed by two open pull requests (see `findConflictingOpenPullRequest`) — also aborts the whole run,
+    //     since automatically picking one pull request over the other could discard real, unmerged release notes.
+    //  4. Open/update each unit's pull request — a singleton unit (today's one-pull-request-per-component
+    //     behaviour, unchanged) via `Manifest.openOrUpdatePullRequest`; a combined unit via
+    //     `openOrUpdateCombinedPullRequest` below.
     async prepare(): Promise<boolean> {
         const allComponentPaths = this.components.map(component => component.path);
         let allSucceeded = true;
 
-        const candidates: { component: ComponentConfig; manifest: Manifest; candidate: ComponentCandidate }[] = [];
+        const manifestsByComponent = new Map<string, Manifest>();
+        const candidatesByComponent = new Map<string, ComponentCandidate>();
+        const candidateEntries: { component: ComponentConfig; candidate: ComponentCandidate }[] = [];
         for (const component of this.components) {
             const label = componentLabel(component);
             logger.info(`--- Preparing release for component '${label}' ---`);
             try {
                 const manifest = Manifest.forComponent(this.github, this.repository, this.targetBranch, component.component, component.path, allComponentPaths, migrationOptionsFor(component, this.migration));
+                manifestsByComponent.set(component.component, manifest);
                 const candidate = await manifest.computeCandidate(component.releaseType);
                 if (candidate) {
-                    candidates.push({ component, manifest, candidate });
+                    candidatesByComponent.set(component.component, candidate);
+                    candidateEntries.push({ component, candidate });
                 }
             } catch (e) {
                 logger.error(`Failed to prepare release for component '${label}'`, e);
@@ -65,7 +81,7 @@ export class ManifestRunner {
             }
         }
 
-        const collisions = detectDuplicateUpdatePaths(candidates);
+        const collisions = detectDuplicateUpdatePaths(candidateEntries);
         if (collisions.length > 0) {
             for (const collision of collisions) {
                 logger.error(`Update path collision: '${collision.path}' would be written by multiple components [${collision.componentNames.join(", ")}] — refusing to prepare any release this run, since combining them would let one component's changes silently overwrite another's`);
@@ -73,17 +89,93 @@ export class ManifestRunner {
             return false;
         }
 
-        for (const { component, manifest, candidate } of candidates) {
-            const label = componentLabel(component);
+        const units = computeReleaseUnits(this.components, this.targetBranch, this.separatePullRequests);
+
+        const openPullRequests: PullRequest[] = [];
+        for await (const pullRequest of this.github.pullRequestIterator(this.targetBranch, "OPEN")) {
+            openPullRequests.push(pullRequest);
+        }
+
+        let hasConflict = false;
+        for (const unit of units) {
+            for (const component of unit.members) {
+                const conflict = findConflictingOpenPullRequest(openPullRequests, component.component, unit.branchName, this.targetBranch);
+                if (conflict) {
+                    logger.error(`Component '${componentLabel(component)}' is already tracked by pull request #${conflict.number} (branch '${conflict.headBranchName}'), which is no longer this component's release branch ('${unit.branchName}') — merge or close pull request #${conflict.number} manually before its next run`);
+                    hasConflict = true;
+                }
+            }
+        }
+        if (hasConflict) {
+            return false;
+        }
+
+        for (const unit of units) {
             try {
-                await manifest.openOrUpdatePullRequest(candidate);
+                if (unit.members.length === 1) {
+                    const component = unit.members[0];
+                    const candidate = candidatesByComponent.get(component.component);
+                    if (!candidate) {
+                        continue;
+                    }
+                    await manifestsByComponent.get(component.component)!.openOrUpdatePullRequest(candidate);
+                } else {
+                    await this.openOrUpdateCombinedPullRequest(unit, candidatesByComponent, openPullRequests);
+                }
             } catch (e) {
-                logger.error(`Failed to prepare release for component '${label}'`, e);
+                logger.error(`Failed to prepare release for release unit '${unit.groupId ?? unit.branchName}'`, e);
                 allSucceeded = false;
             }
         }
 
         return allSucceeded;
+    }
+
+    // Opens or updates the one shared pull request for a multi-member release unit — see `buildCombinedSections`
+    // for how members without a fresh candidate this run are either carried forward unchanged or rejected.
+    private async openOrUpdateCombinedPullRequest(
+        unit: ReleaseUnit,
+        candidatesByComponent: ReadonlyMap<string, ComponentCandidate>,
+        openPullRequests: readonly PullRequest[],
+    ): Promise<void> {
+        const existingPullRequest = openPullRequests.find(pullRequest => pullRequest.headBranchName === unit.branchName);
+        const result = buildCombinedSections(unit, candidatesByComponent, existingPullRequest);
+        if ("orphaned" in result) {
+            throw new Error(`Pull request on branch '${unit.branchName}' already has release notes for component(s) [${result.orphaned.join(", ")}], which ${result.orphaned.length === 1 ? "is" : "are"} no longer a member of this release unit — update the configuration to keep it in this group, or merge/close the existing pull request manually`);
+        }
+
+        if (result.sections.length === 0) {
+            return;
+        }
+
+        const activeMembers = unit.members.filter(component => candidatesByComponent.has(component.component));
+        const updates = activeMembers.flatMap(component => [...candidatesByComponent.get(component.component)!.updates]);
+        const labels = result.sections.map(section => pendingLabel(section.componentName));
+        const title = combinedTitle(unit, this.repository.repo);
+        const body = createPullRequestBody(result.sections);
+
+        const pullRequest: PullRequest = {
+            number: -1,
+            title,
+            body,
+            permalink: "unused",
+            headBranchName: unit.branchName,
+            baseBranchName: this.targetBranch,
+            labels,
+        };
+
+        if (existingPullRequest?.body === pullRequest.body && existingPullRequest.title === pullRequest.title) {
+            logger.info(`Done, pull request https://github.com/${this.repository.owner}/${this.repository.repo}/pull/${existingPullRequest.number} remained the same`);
+            return;
+        }
+
+        if (existingPullRequest) {
+            const updatedPullRequest = await this.github.updatePullRequest(pullRequest, title, updates);
+            logger.info(`Updated pull request https://github.com/${this.repository.owner}/${this.repository.repo}/pull/${updatedPullRequest.number}`);
+        } else {
+            const createdPullRequest = await this.github.createPullRequest(pullRequest, title, updates);
+            logger.info(`Created pull request https://github.com/${this.repository.owner}/${this.repository.repo}/pull/${createdPullRequest.number}`);
+        }
     }
 
     // Returns `false` if any component failed to release, so the caller (e.g. the CLI entrypoint) can reflect
@@ -126,7 +218,7 @@ export class ManifestRunner {
             return null;
         }
 
-        return new ManifestRunner(github, repository, resolved.targetBranch, resolved.components, resolved.migration);
+        return new ManifestRunner(github, repository, resolved.targetBranch, resolved.components, resolved.migration, resolved.separatePullRequests);
     }
 
     private static async resolveComponents(
