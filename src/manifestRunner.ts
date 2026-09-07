@@ -219,7 +219,15 @@ export class ManifestRunner {
     // Note: `cliReleaseType` is only used as a fallback for repositories without a `release-svp-config.json`,
     // preserving today's single-project behaviour. Once a config file is present, each component declares its
     // own `releaseType` and the CLI flag is ignored (with a warning).
-    static async create(repositoryUrl: string, githubToken: string, cliReleaseType?: string, logger: Logger = defaultLogger): Promise<ManifestRunner | null> {
+    // `githubApiBaseUrl` is only ever set by integration tests (to point at an in-process fake GitHub API
+    // server); the CLI entrypoint never passes it, so `undefined` here keeps today's real-GitHub-API behavior.
+    static async create(
+        repositoryUrl: string,
+        githubToken: string,
+        cliReleaseType?: string,
+        logger: Logger = defaultLogger,
+        githubApiBaseUrl?: string,
+    ): Promise<ManifestRunner | null> {
         const repository = parseGitHubUrl(repositoryUrl);
         if (!repository.owner || !repository.repo) {
             logger.error(`Invalid GitHub repository url '${repositoryUrl}', expected 'repository/owner' format`);
@@ -229,7 +237,7 @@ export class ManifestRunner {
         // Initialize wasm for the TOML library
         await init();
 
-        const github = new Github(repository, githubToken, logger);
+        const github = new Github(repository, githubToken, logger, { baseUrl: githubApiBaseUrl });
         const defaultBranch = await github.retrieveDefaultBranch();
 
         const resolved = await ManifestRunner.resolveComponents(github, defaultBranch, cliReleaseType, logger);

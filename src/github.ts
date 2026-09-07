@@ -1,4 +1,9 @@
-import { DEFAULT_FILE_MODE, FileNotFoundError, GitHubFileContents, RepositoryFileCache } from "@google-automations/git-file-utils";
+import {
+    DEFAULT_FILE_MODE,
+    FileNotFoundError,
+    GitHubFileContents,
+    RepositoryFileCache
+} from "@google-automations/git-file-utils";
 import { Octokit as RestOctokit } from "@octokit/rest";
 import { createPullRequest } from "code-suggester";
 import { Octokit, RequestError } from "octokit";
@@ -56,14 +61,16 @@ export class Github {
     private tagsCache?: MemoizedAsyncIterable<Tag>;
     private readonly mergeCommitsCacheByBranch = new Map<string, MemoizedAsyncIterable<Commit>>();
 
-    constructor(repository: Repository, token: string, private readonly logger: Logger) {
+    constructor(repository: Repository, token: string, private readonly logger: Logger, options?: { baseUrl?: string }) {
         this.repository = repository;
 
         this.octokit = new Octokit({
             auth: process.env.GITHUB_TOKEN || token,
+            baseUrl: options?.baseUrl,
         });
         this.restOctokit = new RestOctokit({
             auth: process.env.GITHUB_TOKEN || token,
+            baseUrl: options?.baseUrl,
         });
         this.fileCache = new RepositoryFileCache(this.restOctokit, this.repository);
     }
