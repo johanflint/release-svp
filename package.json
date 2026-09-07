@@ -6,6 +6,7 @@
   "scripts": {
     "start": "node dist/index.mjs",
     "test": "vitest run",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
     "build": "tsc --noEmit && vite build",
     "watch": "vite build --watch"
   },
