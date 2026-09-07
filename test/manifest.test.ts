@@ -1,4 +1,3 @@
-import init from "@rainbowatcher/toml-edit-js";
 import { RequestError } from "octokit";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { buildChangelog } from "../src/changelogBuilder";
@@ -14,10 +13,6 @@ import { UpdateOptions } from "../src/strategy";
 import { buildStrategy } from "../src/strategyFactory";
 import { Update } from "../src/update";
 import { Version } from "../src/version";
-
-vi.mock("@rainbowatcher/toml-edit-js", () => ({
-    default: vi.fn(),
-}));
 
 vi.mock("../src/github", async () => {
     const actual = await vi.importActual("../src/github");
@@ -53,49 +48,29 @@ vi.mock("../src/determineReleases", () => {
 
 describe("Manifest", () => {
     const token = "token";
+    const repository = { owner: "owner", repo: "repo" };
 
     beforeEach(() => {
         vi.resetAllMocks();
-        vi.mocked(init);
     });
 
-    describe("#create", () => {
-        it("creates a manifest, initializes TOML and creates a Github client", async () => {
-            const githubMock = createGithubMock();
+    // Builds the root-component Manifest instance used by most tests below (mirroring how ManifestRunner
+    // constructs one per component in production), plus computes and opens/updates its pull request in one call
+    // — a small test-only convenience, since `computeCandidate`/`openOrUpdatePullRequest` are now deliberately
+    // separate on `Manifest` itself (the title is repo-wide context only the caller has, see manifestRunner.ts).
+    function createManifest(): Manifest {
+        const github = new Github(repository, token, logger);
+        return Manifest.forComponent(github, repository, "main");
+    }
 
-            const result = await Manifest.create("owner/repo", token);
-            expect(result).toBeInstanceOf(Manifest);
-            expect(init).toHaveBeenCalled();
-            expect(Github).toHaveBeenCalledExactlyOnceWith(
-                { owner: "owner", repo: "repo" },
-                token,
-                logger,
-            );
-            expect(githubMock.retrieveDefaultBranch).toHaveBeenCalledOnce();
-        });
+    async function prepareAndOpen(manifest: Manifest, releaseType: string, title: string = "Release v1.2.4"): Promise<void> {
+        const candidate = await manifest.computeCandidate(releaseType);
+        if (candidate) {
+            await manifest.openOrUpdatePullRequest(candidate, title);
+        }
+    }
 
-        it("returns null and logs an error for an invalid repository url", async () => {
-            vi.spyOn(logger, "error");
-            const result = await Manifest.create("invalid", token, logger);
-
-            expect(result).toBeNull();
-            expect(logger.error).toHaveBeenCalledExactlyOnceWith("Invalid GitHub repository url 'invalid', expected 'repository/owner' format");
-            expect(init).not.toHaveBeenCalled();
-        });
-
-        it("propagates errors from retrieveDefaultBranch", async () => {
-            vi.mocked(init);
-            createGithubMock({
-                retrieveDefaultBranch: vi.fn().mockRejectedValue(new Error("boom"))
-            });
-
-            await expect(
-                Manifest.create("owner/repo", token, logger)
-            ).rejects.toThrow("boom");
-        });
-    });
-
-    describe("#prepare", () => {
+    describe("computeCandidate + openOrUpdatePullRequest", () => {
         const pullRequest: PullRequest = {
             number: 2,
             title: "PR",
@@ -116,10 +91,9 @@ describe("Manifest", () => {
                     unreleasedCommits: [],
                 });
 
-                const result = await Manifest.create("owner/repo", token);
-                expect(result).not.toBeNull();
+                const manifest = createManifest();
 
-                await result!.prepare("rust");
+                await prepareAndOpen(manifest, "rust");
 
                 expect(determineReleaseContext).toHaveBeenCalledOnce();
                 expect(logger.info).toHaveBeenCalledWith(`No unreleased commits, nothing to do 🕸️`);
@@ -153,10 +127,9 @@ describe("Manifest", () => {
                     }
                 });
 
-                const result = await Manifest.create("owner/repo", token);
-                expect(result).not.toBeNull();
+                const manifest = createManifest();
 
-                await result!.prepare("rust");
+                await prepareAndOpen(manifest, "rust");
 
                 expect(buildChangelog).toHaveBeenCalled();
                 expect(buildStrategy).toHaveBeenCalledWith("rust", expect.anything());
@@ -199,10 +172,9 @@ describe("Manifest", () => {
                 });
 
 
-                const result = await Manifest.create("owner/repo", token);
-                expect(result).not.toBeNull();
+                const manifest = createManifest();
 
-                await result!.prepare("rust");
+                await prepareAndOpen(manifest, "rust");
 
                 expect(buildChangelog).toHaveBeenCalled();
                 expect(buildStrategy).toHaveBeenCalledWith("rust", expect.anything());
@@ -257,10 +229,9 @@ describe("Manifest", () => {
                     }
                 });
 
-                const result = await Manifest.create("owner/repo", token);
-                expect(result).not.toBeNull();
+                const manifest = createManifest();
 
-                await result!.prepare("rust");
+                await prepareAndOpen(manifest, "rust");
 
                 expect(buildChangelog).toHaveBeenCalled();
                 expect(buildStrategy).toHaveBeenCalledWith("rust", expect.anything());
@@ -277,7 +248,7 @@ describe("Manifest", () => {
                 const existingPullRequest: PullRequest = {
                     ...pullRequest,
                     title: "Release v1.2.4",
-                    body: createPullRequestBody(undefined),
+                    body: createPullRequestBody([{ componentName: "", notes: undefined as unknown as string }]),
                     headBranchName: "release-svp--branches-main",
                     labels: ["autorelease: pending"]
                 };
@@ -305,10 +276,9 @@ describe("Manifest", () => {
                     }
                 });
 
-                const result = await Manifest.create("owner/repo", token);
-                expect(result).not.toBeNull();
+                const manifest = createManifest();
 
-                await result!.prepare("rust");
+                await prepareAndOpen(manifest, "rust");
 
                 expect(logger.info).toHaveBeenCalledWith(`Done, pull request https://github.com/owner/repo/pull/2 remained the same`);
                 expect(githubMock.createPullRequest).not.toHaveBeenCalled();
@@ -319,7 +289,7 @@ describe("Manifest", () => {
                 const existingPullRequest: PullRequest = {
                     ...pullRequest,
                     title: "Release v1.2.4",
-                    body: createPullRequestBody(undefined),
+                    body: createPullRequestBody([{ componentName: "", notes: undefined as unknown as string }]),
                     headBranchName: "release-svp--branches-main",
                     labels: [] // No pending label
                 };
@@ -347,10 +317,9 @@ describe("Manifest", () => {
                     }
                 });
 
-                const result = await Manifest.create("owner/repo", token);
-                expect(result).not.toBeNull();
+                const manifest = createManifest();
 
-                await result!.prepare("rust");
+                await prepareAndOpen(manifest, "rust");
 
                 expect(logger.info).toHaveBeenCalledWith(`Created pull request https://github.com/owner/repo/pull/2`);
                 expect(githubMock.createPullRequest).toHaveBeenCalled();
@@ -373,10 +342,9 @@ describe("Manifest", () => {
 
             vi.mocked(determineReleases).mockResolvedValue([]);
 
-            const result = await Manifest.create("owner/repo", token);
-            expect(result).not.toBeNull();
+            const manifest = createManifest();
 
-            await result!.release();
+            await manifest.release();
 
             expect(logger.info).toHaveBeenCalledWith(`Nothing to release 🐼`);
             expect(githubMock.createRelease).not.toHaveBeenCalled();
@@ -388,10 +356,9 @@ describe("Manifest", () => {
             vi.mocked(determineReleases).mockResolvedValue([release]);
             vi.mocked(githubMock.createRelease).mockResolvedValue({ id: 1, url: "url", pullRequestNumber: 4 });
 
-            const result = await Manifest.create("owner/repo", token);
-            expect(result).not.toBeNull();
+            const manifest = createManifest();
 
-            await result!.release();
+            await manifest.release();
 
             expect(githubMock.createRelease).toHaveBeenCalledWith(release);
         });
@@ -402,10 +369,9 @@ describe("Manifest", () => {
             vi.mocked(determineReleases).mockResolvedValue([release]);
             vi.mocked(githubMock.createRelease).mockResolvedValue({ id: 1, url: "url", pullRequestNumber: 4 });
 
-            const result = await Manifest.create("owner/repo", token);
-            expect(result).not.toBeNull();
+            const manifest = createManifest();
 
-            await result!.release();
+            await manifest.release();
 
             expect(githubMock.createRelease).toHaveBeenCalledWith(release);
             expect(githubMock.commentOnIssue).toHaveBeenCalledWith(":bowtie: Created release [v1.2.4](url) :tulip:", 4);
@@ -417,10 +383,9 @@ describe("Manifest", () => {
             vi.mocked(determineReleases).mockResolvedValue([release]);
             vi.mocked(githubMock.createRelease).mockResolvedValue({ id: 1, url: "url", pullRequestNumber: 4 });
 
-            const result = await Manifest.create("owner/repo", token);
-            expect(result).not.toBeNull();
+            const manifest = createManifest();
 
-            await result!.release();
+            await manifest.release();
 
             expect(githubMock.createRelease).toHaveBeenCalledWith(release);
             expect(githubMock.removePullRequestLabels).toHaveBeenCalledWith(["autorelease: pending"], 4);
@@ -434,10 +399,9 @@ describe("Manifest", () => {
             vi.mocked(determineReleases).mockResolvedValue([release]);
             vi.mocked(githubMock.createRelease).mockRejectedValue(new DuplicateReleaseError(new RequestError("", 400, {request: { method: "GET", url: "", headers: {}}}), "v1.2.4"));
 
-            const result = await Manifest.create("owner/repo", token);
-            expect(result).not.toBeNull();
+            const manifest = createManifest();
 
-            await result!.release();
+            await manifest.release();
 
             expect(githubMock.createRelease).toHaveBeenCalledWith(release);
             expect(logger.warn).toHaveBeenCalledWith(`Duplicate release tag for v1.2.4`);
@@ -451,17 +415,16 @@ describe("Manifest", () => {
             vi.mocked(determineReleases).mockResolvedValue([release]);
             vi.mocked(githubMock.createRelease).mockRejectedValue(new Error("boom"));
 
-            const result = await Manifest.create("owner/repo", token);
-            expect(result).not.toBeNull();
+            const manifest = createManifest();
 
             await expect(
-                result!.release()
+                manifest.release()
             ).rejects.toThrow("boom");
         });
     });
 
     describe("with a named component", () => {
-        it("prepare() namespaces the tag prefix, branch name and label", async () => {
+        it("computeCandidate/openOrUpdatePullRequest namespaces the tag prefix, branch name and label", async () => {
             const githubMock = createGithubMock({
                 pullRequestIterator: (async function* () {}),
                 createPullRequest: vi.fn().mockResolvedValue({ number: 5 }),
@@ -484,7 +447,7 @@ describe("Manifest", () => {
             });
 
             const manifest = Manifest.forComponent(github, { owner: "owner", repo: "repo" }, "main", "api");
-            await manifest.prepare("rust");
+            await prepareAndOpen(manifest, "rust", "Release api v1.2.4");
 
             expect(determineReleaseContext).toHaveBeenCalledWith(expect.anything(), "main", "api-", "", [""], undefined);
             expect(githubMock.createPullRequest).toHaveBeenCalledWith(
@@ -517,6 +480,7 @@ describe("Manifest", () => {
                 releaseBranchName: "release-svp--branches-main--api",
                 labelPending: "autorelease: pending (api)",
                 tagPrefix: "api-",
+                componentName: "api",
             });
             expect(githubMock.removePullRequestLabels).toHaveBeenCalledWith(["autorelease: pending (api)"], 4);
             expect(githubMock.addPullRequestLabels).toHaveBeenCalledWith(["autorelease: tagged (api)"], 4);
