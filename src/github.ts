@@ -61,12 +61,29 @@ export class Github {
     private tagsCache?: MemoizedAsyncIterable<Tag>;
     private readonly mergeCommitsCacheByBranch = new Map<string, MemoizedAsyncIterable<Commit>>();
 
-    constructor(repository: Repository, token: string, private readonly logger: Logger, options?: { baseUrl?: string }) {
+    constructor(
+        repository: Repository,
+        token: string,
+        private readonly logger: Logger,
+        // `baseUrl` is only ever set by tests (e.g. to point both clients at an in-process fake GitHub API
+        // server); production call sites never pass it, so `undefined` keeps today's real-GitHub-API behavior
+        // unchanged. `disableThrottling` is likewise test-only: octokit's default write-request throttling (see
+        // `@octokit/plugin-throttling`, a 1 request/sec minimum spacing meant to avoid tripping GitHub's real
+        // abuse detection) is exactly the right default against the real API, but serves no purpose — and
+        // meaningfully slows down every test run — against an in-process fake server that has no such limits.
+        options?: { baseUrl?: string; disableThrottling?: boolean },
+    ) {
         this.repository = repository;
 
+        // The plain "octokit" package supplies its own default `throttle: { onRateLimit, onSecondaryRateLimit }`
+        // handlers (required by `@octokit/plugin-throttling`, which throws at construction time if they're
+        // missing). Passing our own `throttle` object entirely replaces that default rather than merging with
+        // it, so `throttle` is only included here when actually disabling throttling for tests — otherwise
+        // it's omitted so the package's own (valid) defaults apply untouched.
         this.octokit = new Octokit({
             auth: process.env.GITHUB_TOKEN || token,
             baseUrl: options?.baseUrl,
+            ...(options?.disableThrottling ? { throttle: { enabled: false } } : {}),
         });
         this.restOctokit = new RestOctokit({
             auth: process.env.GITHUB_TOKEN || token,
