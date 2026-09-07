@@ -320,6 +320,135 @@ describe("Github", () => {
 
             await expect(collect()).rejects.toThrow("no pagination cursor was returned");
         });
+
+        it("fetches merge commits once and replays them across multiple iterations on the same branch", async () => {
+            graphqlMock.mockResolvedValue({
+                repository: {
+                    ref: {
+                        target: {
+                            history: {
+                                nodes: [{ sha: "sha0", message: "Merge PR #1", associatedPullRequests: { nodes: [] } }],
+                                pageInfo: { hasNextPage: false, endCursor: undefined },
+                            },
+                        },
+                    },
+                },
+            });
+
+            const github = new Github({ owner: "owner", repo: "repo" }, "token", createLogger());
+            const drain = async () => {
+                const commits = [];
+                for await (const commit of github.mergeCommitIterator("main")) {
+                    commits.push(commit);
+                }
+                return commits;
+            };
+
+            const first = await drain();
+            const second = await drain();
+
+            expect(first).toEqual(second);
+            expect(graphqlMock).toHaveBeenCalledTimes(1);
+        });
+
+        it("fetches merge commits separately per branch, never sharing one branch's cache with another's", async () => {
+            graphqlMock.mockImplementation(async (_query: string, parameters: any) => ({
+                repository: {
+                    ref: {
+                        target: {
+                            history: {
+                                nodes: [{ sha: `sha-${parameters.targetBranch}`, message: "Merge PR #1", associatedPullRequests: { nodes: [] } }],
+                                pageInfo: { hasNextPage: false, endCursor: undefined },
+                            },
+                        },
+                    },
+                },
+            }));
+
+            const github = new Github({ owner: "owner", repo: "repo" }, "token", createLogger());
+            const drain = async (branch: string) => {
+                const commits = [];
+                for await (const commit of github.mergeCommitIterator(branch)) {
+                    commits.push(commit);
+                }
+                return commits;
+            };
+
+            const main = await drain("main");
+            const develop = await drain("develop");
+
+            expect(main[0].sha).toBe("sha-main");
+            expect(develop[0].sha).toBe("sha-develop");
+            expect(graphqlMock).toHaveBeenCalledTimes(2);
+        });
+
+        it("re-throws the same fetch failure on every later iteration instead of silently looking exhausted", async () => {
+            graphqlMock.mockRejectedValue(new Error("boom"));
+
+            const github = new Github({ owner: "owner", repo: "repo" }, "token", createLogger());
+            const drain = async () => {
+                const commits = [];
+                for await (const commit of github.mergeCommitIterator("main")) {
+                    commits.push(commit);
+                }
+                return commits;
+            };
+
+            await expect(drain()).rejects.toThrow("boom");
+            // A component whose own commit walk happens to run after another component already hit this failure
+            // must still see the same failure itself, never a silently-empty ("nothing unreleased") result.
+            await expect(drain()).rejects.toThrow("boom");
+            expect(graphqlMock).toHaveBeenCalledTimes(1);
+        });
+    });
+
+    describe("#tagIterator", () => {
+        it("fetches tags once and replays them across multiple iterations on the same instance", async () => {
+            graphqlMock.mockResolvedValue({
+                repository: {
+                    refs: {
+                        nodes: [
+                            { name: "v1.0.0", target: { oid: "sha1", committedDate: "2024-01-01" } },
+                            { name: "v0.9.0", target: { oid: "sha0", committedDate: "2023-01-01" } },
+                        ],
+                        pageInfo: { hasNextPage: false, endCursor: undefined },
+                    },
+                },
+            });
+
+            const github = new Github({ owner: "owner", repo: "repo" }, "token", createLogger());
+            const drain = async () => {
+                const tags = [];
+                for await (const tag of github.tagIterator()) {
+                    tags.push(tag);
+                }
+                return tags;
+            };
+
+            const first = await drain();
+            const second = await drain();
+
+            expect(first).toEqual(second);
+            expect(first.map(tag => tag.name)).toEqual(["v1.0.0", "v0.9.0"]);
+            expect(graphqlMock).toHaveBeenCalledTimes(1);
+        });
+
+        it("re-throws the same fetch failure on every later iteration instead of silently looking exhausted", async () => {
+            graphqlMock.mockRejectedValue(new Error("boom"));
+
+            const github = new Github({ owner: "owner", repo: "repo" }, "token", createLogger());
+            const drain = async () => {
+                const tags = [];
+                for await (const tag of github.tagIterator()) {
+                    tags.push(tag);
+                }
+                return tags;
+            };
+
+            await expect(drain()).rejects.toThrow("boom");
+            await expect(drain()).rejects.toThrow("boom");
+            expect(graphqlMock).toHaveBeenCalledTimes(1);
+        });
     });
 
     describe("#pullRequestIterator", () => {

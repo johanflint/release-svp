@@ -46,6 +46,15 @@ export class Github {
     private readonly fileCache: RepositoryFileCache;
     // Shared across every call the instance makes (not per fetched page) — see MAX_CONCURRENT_CHANGED_FILE_PAGINATIONS.
     private readonly changedFilesPaginationLimit = new ConcurrencyLimit(MAX_CONCURRENT_CHANGED_FILE_PAGINATIONS);
+    // Repo-wide tags and a branch's merge commits are identical for every component (neither query is scoped to
+    // one component) — one `ManifestRunner` run calls `tagIterator`/`mergeCommitIterator` once per configured
+    // component (see manifestRunner.ts, determineReleaseContext.ts, determineReleases.ts), so without this cache
+    // a monorepo with N components would re-fetch/re-paginate the exact same tag list and commit history N
+    // times over. Caching per `Github` instance (rather than e.g. per call) is deliberate: one instance's
+    // lifetime is exactly one CLI invocation (one `prepare()` or `release()` run — see ManifestRunner.create()),
+    // so this never risks serving stale data across separate runs.
+    private tagsCache?: MemoizedAsyncIterable<Tag>;
+    private readonly mergeCommitsCacheByBranch = new Map<string, MemoizedAsyncIterable<Commit>>();
 
     constructor(repository: Repository, token: string, private readonly logger: Logger) {
         this.repository = repository;
@@ -65,8 +74,8 @@ export class Github {
     }
 
     async *tagIterator(maxResults?: number) {
-        const fetchPage = (cursor?: string | undefined) => this.tagsGraphQL(cursor);
-        yield* paginate(fetchPage, maxResults);
+        this.tagsCache ??= new MemoizedAsyncIterable<Tag>(paginate(cursor => this.tagsGraphQL(cursor)));
+        yield* truncate(this.tagsCache, maxResults);
     }
 
     private async tagsGraphQL(cursor?: string): Promise<Tags | null> {
@@ -102,8 +111,12 @@ export class Github {
     }
 
     async *mergeCommitIterator(branch: string, maxResults?: number) {
-        const fetchPage = (cursor?: string | undefined) => this.mergeCommitsGraphQL(branch, cursor);
-        yield* paginate(fetchPage, maxResults);
+        let cache = this.mergeCommitsCacheByBranch.get(branch);
+        if (!cache) {
+            cache = new MemoizedAsyncIterable<Commit>(paginate(cursor => this.mergeCommitsGraphQL(branch, cursor)));
+            this.mergeCommitsCacheByBranch.set(branch, cache);
+        }
+        yield* truncate(cache, maxResults);
     }
 
     private async mergeCommitsGraphQL(targetBranch: string, cursor?: string): Promise<CommitHistory | null> {
@@ -578,3 +591,61 @@ async function *paginate<T>(
         cursor = response.pageInfo.endCursor;
     }
 }
+
+// Wraps a single-use async generator so it can be iterated multiple times (e.g. once per configured component in
+// the same run — see `tagIterator`/`mergeCommitIterator`) while only ever pulling each underlying page once.
+// Earlier items are replayed from `items` on every new iteration; iteration only reaches back into `source` once
+// past whatever's already cached, continuing it rather than restarting it. If `source` throws (e.g. a transient
+// GraphQL failure mid-pagination), that error is cached and re-thrown on every subsequent iteration too — a
+// once-broken source must never silently look "exhausted" (yielding fewer items than really exist) to a
+// component that iterates it later in the same run, since that could produce an incomplete-but-successful-looking
+// result instead of a loud failure.
+class MemoizedAsyncIterable<T> {
+    private readonly items: T[] = [];
+    private done = false;
+    private error?: unknown;
+
+    constructor(private readonly source: AsyncGenerator<T>) {}
+
+    async *[Symbol.asyncIterator](): AsyncGenerator<T> {
+        for (let index = 0; ; index++) {
+            if (index < this.items.length) {
+                yield this.items[index];
+                continue;
+            }
+            if (this.done) {
+                return;
+            }
+            if (this.error) {
+                throw this.error;
+            }
+
+            let next: IteratorResult<T>;
+            try {
+                next = await this.source.next();
+            } catch (e) {
+                this.error = e;
+                throw e;
+            }
+
+            if (next.done) {
+                this.done = true;
+                return;
+            }
+            this.items.push(next.value);
+            yield next.value;
+        }
+    }
+}
+
+async function *truncate<T>(source: AsyncIterable<T>, maxResults: number = Number.MAX_SAFE_INTEGER): AsyncGenerator<T> {
+    let count = 0;
+    for await (const item of source) {
+        if (count >= maxResults) {
+            return;
+        }
+        count++;
+        yield item;
+    }
+}
+
