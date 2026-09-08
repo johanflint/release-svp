@@ -830,6 +830,74 @@ describe("Github", () => {
             expect(graphqlMock).toHaveBeenCalledTimes(1);
         });
 
+        it("stops yielding once maxResults is reached, even mid-page, and never fetches a further page", async () => {
+            // Regression test: the generic paginate() helper used to only check maxResults *between* pages, so
+            // a caller asking for (say) 2 results would still receive every item on a bigger first page, and —
+            // had that page also reported hasNextPage: true — paginate() would have kept fetching pages it no
+            // longer needed at all.
+            graphqlMock.mockResolvedValue({
+                repository: {
+                    pullRequests: {
+                        nodes: [1, 2, 3].map(number => ({
+                            number,
+                            title: "PR",
+                            baseRefName: "main",
+                            headRefName: "release-svp--branches-main",
+                            labels: { nodes: [], pageInfo: { hasNextPage: false } },
+                            body: "body",
+                            permalink: "permalink",
+                            mergeCommit: { oid: `sha${number}` },
+                        })),
+                        pageInfo: { endCursor: "cursor-page-1", hasNextPage: true },
+                    },
+                },
+            });
+
+            const github = new Github({ owner: "owner", repo: "repo" }, "token", createLogger());
+            const pullRequests = [];
+            for await (const pullRequest of github.pullRequestIterator("main", "MERGED", 2)) {
+                pullRequests.push(pullRequest);
+            }
+
+            expect(pullRequests.map(pr => pr.number)).toEqual([1, 2]);
+            expect(graphqlMock).toHaveBeenCalledTimes(1);
+        });
+
+        it("throws when a page reports more results are available but no cursor to continue from", async () => {
+            // Regression test: silently treating this as "no more pages" would under-report results, but
+            // silently retrying would call fetchPage with the same (missing) cursor as the page that just
+            // produced this response — re-fetching and re-yielding that same page's items forever, since
+            // nothing here bounds the number of pages fetched.
+            graphqlMock.mockResolvedValue({
+                repository: {
+                    pullRequests: {
+                        nodes: [{
+                            number: 1,
+                            title: "PR",
+                            baseRefName: "main",
+                            headRefName: "release-svp--branches-main",
+                            labels: { nodes: [], pageInfo: { hasNextPage: false } },
+                            body: "body",
+                            permalink: "permalink",
+                            mergeCommit: { oid: "sha1" },
+                        }],
+                        pageInfo: { endCursor: undefined, hasNextPage: true },
+                    },
+                },
+            });
+
+            const github = new Github({ owner: "owner", repo: "repo" }, "token", createLogger());
+            const collect = async () => {
+                const pullRequests = [];
+                for await (const pullRequest of github.pullRequestIterator("main", "MERGED")) {
+                    pullRequests.push(pullRequest);
+                }
+                return pullRequests;
+            };
+
+            await expect(collect()).rejects.toThrow("Server reported more pages are available (hasNextPage: true) but returned no cursor to continue from");
+        });
+
         it("follows pagination and merges all labels when a pull request has more labels than fit on one page", async () => {
             // Regression test for the bug this fix addresses: with a bare `labels(first: 10)` query and no
             // pagination, a release-relevant label on the second page (here "autorelease: pending (1.2.3)") used

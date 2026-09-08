@@ -835,6 +835,21 @@ type Response<T> = {
     pageInfo: PageInfo;
 }
 
+// Thrown by the generic paginate() below when a page reports more results are available (hasNextPage: true)
+// but returns no cursor to fetch them with. Silently treating that as "no more pages" would under-report
+// results just like a truncated changed-file/label/associated-pull-request list would (see e.g.
+// PullRequestFilesIncompleteError) — but silently retrying with the same (missing) cursor is worse, since
+// fetchPage would then be called with the *same* arguments as the page that just produced this response,
+// re-fetching and re-yielding that same page's items forever (bounded only by maxResults, if any is given at
+// all — tagIterator/mergeCommitIterator/pullRequestIterator all normally run unbounded). Loud failure is the
+// only safe option here.
+export class PaginationIncompleteError extends Error {
+    constructor(message: string) {
+        super(message);
+        this.name = "PaginationIncompleteError";
+    }
+}
+
 async function *paginate<T>(
     fetchPage: (cursor?: string) => Promise<Response<T> | null>,
     maxResults: number = Number.MAX_SAFE_INTEGER
@@ -849,13 +864,23 @@ async function *paginate<T>(
             break;
         }
 
-        for (let x = 0; x < response.data.length; x++) {
+        // Stops yielding mid-page, not just between pages, once maxResults is reached — a caller asking for
+        // (say) 3 results must never receive more just because they happened to arrive on a bigger page.
+        for (let x = 0; x < response.data.length && results < maxResults; x++) {
             results += 1;
             yield response.data[x];
         }
 
+        if (results >= maxResults) {
+            break;
+        }
+
         if (!response.pageInfo.hasNextPage) {
             break;
+        }
+
+        if (!response.pageInfo.endCursor) {
+            throw new PaginationIncompleteError("Server reported more pages are available (hasNextPage: true) but returned no cursor to continue from");
         }
 
         cursor = response.pageInfo.endCursor;
