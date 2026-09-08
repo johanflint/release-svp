@@ -27,6 +27,10 @@ export interface IntegrationHarness {
     // either, and this is exactly the "per-run" seam integration tests need to exercise repeatedly (e.g.
     // prepare → merge → release → more commits → prepare again).
     createRunner(cliReleaseType?: string): Promise<ManifestRunner>;
+    // Simulates a transient GitHub API failure for the next matching request only — see
+    // `FakeGithubServer.failNextRequest`. Used to test that a run isolates a failure to just the affected
+    // component/unit and recovers cleanly on a subsequent, unfaulted run.
+    failNextRequest(predicate: (method: string, pathname: string, body: any) => boolean, status: number, message: string): void;
     close(): Promise<void>;
 }
 
@@ -50,6 +54,7 @@ export async function createHarness(options?: { owner?: string; repo?: string; d
             }
             return runner;
         },
+        failNextRequest: (predicate, status, message) => server.failNextRequest(predicate, status, message),
         close: () => server.close(),
     };
 }

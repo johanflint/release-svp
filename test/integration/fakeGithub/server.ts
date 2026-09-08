@@ -17,9 +17,17 @@ interface RouteMatch {
     handle: (params: string[], body: any, url: URL) => unknown;
 }
 
+// A one-shot, injected failure for the next request matching `predicate` — see `FakeGithubServer.failNextRequest`.
+interface FaultRule {
+    predicate: (method: string, pathname: string, body: any) => boolean;
+    status: number;
+    message: string;
+}
+
 export class FakeGithubServer {
     private readonly server: Server;
     private readonly routes: RouteMatch[];
+    private faultRule: FaultRule | undefined;
 
     constructor(readonly state: RepoState) {
         this.routes = buildRoutes(state);
@@ -36,6 +44,15 @@ export class FakeGithubServer {
         await new Promise<void>((resolve, reject) => this.server.close(err => (err ? reject(err) : resolve())));
     }
 
+    // Simulates a transient GitHub API failure: the next request matching `predicate` (method, decoded
+    // pathname, and parsed JSON body) fails with `status`/`message` instead of reaching its normal handler —
+    // used to test that release-svp isolates a failure to just the affected component/unit and recovers
+    // cleanly on a subsequent run (see scenarios/retryAfterPartialFailure.test.ts). Fires at most once: cleared
+    // automatically the moment it matches, so a retried run goes through to the real handler.
+    failNextRequest(predicate: (method: string, pathname: string, body: any) => boolean, status: number, message: string): void {
+        this.faultRule = { predicate, status, message };
+    }
+
     private async handleRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
         const url = new URL(req.url ?? "/", "http://localhost");
         // Decode the pathname once up front: octokit percent-encodes slashes inside path parameters (e.g. a
@@ -44,6 +61,14 @@ export class FakeGithubServer {
         const pathname = decodeURIComponent(url.pathname);
         try {
             const body = await readJsonBody(req);
+
+            if (this.faultRule && this.faultRule.predicate(req.method ?? "GET", pathname, body)) {
+                const { status, message } = this.faultRule;
+                this.faultRule = undefined;
+                respondJson(res, status, { message });
+                return;
+            }
+
             const match = matchPath(this.routes, req.method ?? "GET", pathname);
             if (!match) {
                 // 404, not 501: octokit's built-in retry plugin retries any error status except a small
