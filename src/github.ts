@@ -351,7 +351,8 @@ export class Github {
                     baseBranchName: pullRequest.baseRefName,
                     mergeCommitOid: pullRequest.mergeCommit?.oid,
                     labels: await this.extractLabels(pullRequest, pullRequest.number),
-                    ...await this.extractChangedFilePaths(pullRequest, pullRequest.number),
+                    // No changedFilePaths here — mergedPullRequests.graphql deliberately doesn't fetch files;
+                    // see the GraphQLPullRequest.files comment.
                 };
             })),
         };
@@ -678,7 +679,13 @@ interface GraphQLPullRequest {
     mergeCommit?: {
         oid: string;
     };
-    files: {
+    // Only present on nodes fetched via pullRequestsSince.graphql (mergeCommitsGraphQL) — the changed-file list
+    // is needed there for component path attribution (see componentPathFilter.ts). mergedPullRequests.graphql
+    // (pullRequestsGraphQL) intentionally omits this field: none of its callers (determineReleases.ts,
+    // Manifest.findExistingPullRequest, ManifestRunner's open-pull-request conflict check) need changed files,
+    // and fetching/paginating them for every historic merged pull request risked blocking those scans outright
+    // whenever an old, unrelated pull request had enough changed files to exceed the pagination safety cap.
+    files?: {
         nodes: {
             path: string;
         }[];

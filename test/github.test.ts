@@ -145,6 +145,95 @@ describe("Github", () => {
             expect(logger.warn).not.toHaveBeenCalled();
         });
 
+        it("bounds how many pull requests' follow-up file pagination runs concurrently", async () => {
+            const inFlight = new Set<number>();
+            let maxObservedInFlight = 0;
+            const releasers = new Map<number, () => void>();
+
+            graphqlMock.mockImplementation(async (_query: string, parameters: any) => {
+                if (parameters.number === undefined) {
+                    return {
+                        repository: {
+                            ref: {
+                                target: {
+                                    history: {
+                                        nodes: [1, 2, 3].map(number => ({
+                                            sha: `sha${number}`,
+                                            message: `Merge PR #${number}`,
+                                            associatedPullRequests: {
+                                                nodes: [{
+                                                    number,
+                                                    title: "PR",
+                                                    body: "body",
+                                                    permalink: "permalink",
+                                                    headRefName: "head",
+                                                    baseRefName: "main",
+                                                    mergeCommit: { oid: `sha${number}` },
+                                                    labels: { nodes: [], pageInfo: { hasNextPage: false } },
+                                                    files: {
+                                                        nodes: [{ path: `a/file-${number}.rs` }],
+                                                        pageInfo: { hasNextPage: true, endCursor: `cursor-${number}` },
+                                                    },
+                                                }],
+                                            },
+                                        })),
+                                        pageInfo: { hasNextPage: false, endCursor: undefined },
+                                    },
+                                },
+                            },
+                        },
+                    };
+                }
+
+                // Follow-up single-PR files query: gate on a manually-released promise so the test controls
+                // exactly when each pull request's pagination "completes", to observe concurrency in between.
+                inFlight.add(parameters.number);
+                maxObservedInFlight = Math.max(maxObservedInFlight, inFlight.size);
+                await new Promise<void>(resolve => releasers.set(parameters.number, resolve));
+                inFlight.delete(parameters.number);
+
+                return {
+                    repository: {
+                        pullRequest: {
+                            files: {
+                                nodes: [{ path: `a/file-${parameters.number}-more.rs` }],
+                                pageInfo: { hasNextPage: false, endCursor: undefined },
+                            },
+                        },
+                    },
+                };
+            });
+
+            const github = new Github({ owner: "owner", repo: "repo" }, "token", createLogger());
+            const collectPromise = (async () => {
+                const commits = [];
+                for await (const commit of github.mergeCommitIterator("main")) {
+                    commits.push(commit);
+                }
+                return commits;
+            })();
+
+            // Let the two allowed concurrent pagination calls start and queue the third.
+            await new Promise(resolve => setTimeout(resolve, 0));
+            expect(inFlight.size).toBe(2);
+
+            // Releasing one frees a slot for the third to start.
+            releasers.get(1)!();
+            await new Promise(resolve => setTimeout(resolve, 0));
+            expect(inFlight.size).toBe(2);
+
+            releasers.get(2)!();
+            releasers.get(3)!();
+            const commits = await collectPromise;
+
+            expect(maxObservedInFlight).toBe(2);
+            expect(commits.map(commit => commit.pullRequest?.changedFilePaths)).toEqual([
+                ["a/file-1.rs", "a/file-1-more.rs"],
+                ["a/file-2.rs", "a/file-2-more.rs"],
+                ["a/file-3.rs", "a/file-3-more.rs"],
+            ]);
+        });
+
         it("rejects when follow-up pagination fails", async () => {
             graphqlMock.mockImplementation(async (_query: string, parameters: any) => {
                 if (parameters.number !== undefined) {
@@ -565,7 +654,16 @@ describe("Github", () => {
     });
 
     describe("#pullRequestIterator", () => {
-        it("maps changed file paths from merged pull requests", async () => {
+        it("never fetches or paginates changed files, even for a pull request that touched far more files than the safety cap allows", async () => {
+            // Regression test for the bug this fix addresses: pullRequestIterator's callers (determineReleases,
+            // Manifest.findExistingPullRequest, ManifestRunner's open-pull-request conflict check) only need
+            // labels/body/merge-SHA/number, never changed-file paths — but the query used to fetch and
+            // paginate every merged pull request's changed files anyway. Since release() scans every merged
+            // pull request with no early exit, a single old, unrelated pull request with more changed files
+            // than MAX_ADDITIONAL_CHANGED_FILE_PAGES allows used to throw PullRequestFilesIncompleteError and
+            // block the entire scan. mergedPullRequests.graphql no longer requests `files` at all, so no
+            // follow-up pull-request-files query should ever be made here, and the mapped result has no
+            // changedFilePaths.
             graphqlMock.mockResolvedValue({
                 repository: {
                     pullRequests: {
@@ -578,10 +676,6 @@ describe("Github", () => {
                             body: "body",
                             permalink: "permalink",
                             mergeCommit: { oid: "sha0" },
-                            files: {
-                                nodes: [{ path: "b/Cargo.toml" }],
-                                pageInfo: { hasNextPage: false },
-                            },
                         }],
                         pageInfo: { endCursor: undefined, hasNextPage: false },
                     },
@@ -595,86 +689,9 @@ describe("Github", () => {
             }
 
             expect(pullRequests).toHaveLength(1);
-            expect(pullRequests[0].changedFilePaths).toEqual(["b/Cargo.toml"]);
-        });
-
-        it("bounds how many pull requests' follow-up file pagination runs concurrently", async () => {
-            const inFlight = new Set<number>();
-            let maxObservedInFlight = 0;
-            const releasers = new Map<number, () => void>();
-
-            graphqlMock.mockImplementation(async (_query: string, parameters: any) => {
-                if (parameters.number === undefined) {
-                    return {
-                        repository: {
-                            pullRequests: {
-                                nodes: [1, 2, 3].map(number => ({
-                                    number,
-                                    title: "PR",
-                                    baseRefName: "main",
-                                    headRefName: "release-svp--branches-main",
-                                    labels: { nodes: [], pageInfo: { hasNextPage: false } },
-                                    body: "body",
-                                    permalink: "permalink",
-                                    mergeCommit: { oid: `sha${number}` },
-                                    files: {
-                                        nodes: [{ path: `a/file-${number}.rs` }],
-                                        pageInfo: { hasNextPage: true, endCursor: `cursor-${number}` },
-                                    },
-                                })),
-                                pageInfo: { endCursor: undefined, hasNextPage: false },
-                            },
-                        },
-                    };
-                }
-
-                // Follow-up single-PR files query: gate on a manually-released promise so the test controls
-                // exactly when each pull request's pagination "completes", to observe concurrency in between.
-                inFlight.add(parameters.number);
-                maxObservedInFlight = Math.max(maxObservedInFlight, inFlight.size);
-                await new Promise<void>(resolve => releasers.set(parameters.number, resolve));
-                inFlight.delete(parameters.number);
-
-                return {
-                    repository: {
-                        pullRequest: {
-                            files: {
-                                nodes: [{ path: `a/file-${parameters.number}-more.rs` }],
-                                pageInfo: { hasNextPage: false, endCursor: undefined },
-                            },
-                        },
-                    },
-                };
-            });
-
-            const github = new Github({ owner: "owner", repo: "repo" }, "token", createLogger());
-            const collectPromise = (async () => {
-                const pullRequests = [];
-                for await (const pullRequest of github.pullRequestIterator("main", "MERGED")) {
-                    pullRequests.push(pullRequest);
-                }
-                return pullRequests;
-            })();
-
-            // Let the two allowed concurrent pagination calls start and queue the third.
-            await new Promise(resolve => setTimeout(resolve, 0));
-            expect(inFlight.size).toBe(2);
-
-            // Releasing one frees a slot for the third to start.
-            releasers.get(1)!();
-            await new Promise(resolve => setTimeout(resolve, 0));
-            expect(inFlight.size).toBe(2);
-
-            releasers.get(2)!();
-            releasers.get(3)!();
-            const pullRequests = await collectPromise;
-
-            expect(maxObservedInFlight).toBe(2);
-            expect(pullRequests.map(pr => pr.changedFilePaths)).toEqual([
-                ["a/file-1.rs", "a/file-1-more.rs"],
-                ["a/file-2.rs", "a/file-2-more.rs"],
-                ["a/file-3.rs", "a/file-3-more.rs"],
-            ]);
+            expect(pullRequests[0].changedFilePaths).toBeUndefined();
+            // Only one graphql call made — the bulk pull-request query — never a follow-up per-PR files query.
+            expect(graphqlMock).toHaveBeenCalledTimes(1);
         });
 
         it("follows pagination and merges all labels when a pull request has more labels than fit on one page", async () => {
@@ -711,7 +728,6 @@ describe("Github", () => {
                                 body: "body",
                                 permalink: "permalink",
                                 mergeCommit: { oid: "sha0" },
-                                files: { nodes: [], pageInfo: { hasNextPage: false } },
                             }],
                             pageInfo: { endCursor: undefined, hasNextPage: false },
                         },
@@ -763,7 +779,6 @@ describe("Github", () => {
                                 body: "body",
                                 permalink: "permalink",
                                 mergeCommit: { oid: "sha0" },
-                                files: { nodes: [], pageInfo: { hasNextPage: false } },
                             }],
                             pageInfo: { endCursor: undefined, hasNextPage: false },
                         },
