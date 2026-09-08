@@ -76,6 +76,31 @@ describe("Version", () => {
        it("throws for an invalid version number", () => {
            expect(() => Version.parse("1.2")).toThrow("Unable to parse version string: 1.2");
        });
+
+       it("throws for a version with a leading prefix", () => {
+           expect(() => Version.parse("junk1.2.3")).toThrow("Unable to parse version string: junk1.2.3");
+       });
+
+       it("throws for a version with a trailing suffix", () => {
+           expect(() => Version.parse("1.2.3garbage")).toThrow("Unable to parse version string: 1.2.3garbage");
+       });
+
+       it("throws for a version with a dangling pre-release separator", () => {
+           expect(() => Version.parse("1.2.3-")).toThrow("Unable to parse version string: 1.2.3-");
+       });
+
+       it("throws for a version with a dangling build separator", () => {
+           expect(() => Version.parse("1.2.3+")).toThrow("Unable to parse version string: 1.2.3+");
+       });
+
+       it("throws for a version with a leading zero in a numeric component", () => {
+           expect(() => Version.parse("01.2.3")).toThrow("Unable to parse version string: 01.2.3");
+       });
+
+       it("throws for a version with whitespace", () => {
+           expect(() => Version.parse(" 1.2.3")).toThrow("Unable to parse version string:  1.2.3");
+           expect(() => Version.parse("1.2.3 ")).toThrow("Unable to parse version string: 1.2.3 ");
+       });
    });
 
     describe("toString", () => {

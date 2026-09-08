@@ -1,4 +1,14 @@
-const VERSION_REGEX = /(?<major>\d+)\.(?<minor>\d+)\.(?<patch>\d+)(-(?<preRelease>[^+]+))?(\+(?<build>.*))?/;
+// The SemVer 2.0 grammar for a version's body (everything after any "v"/"[" prefix a caller may
+// strip itself), without anchors — exported so other modules (e.g. release.ts, extracting a
+// version out of a larger changelog heading) can match exactly the same valid-version substring
+// instead of inventing their own looser pattern. Follows
+// https://semver.org/#backusnaur-form-grammar-for-valid-semver-versions: no leading zeros in
+// numeric identifiers, and pre-release/build metadata must be non-empty dot-separated identifiers.
+export const VERSION_PATTERN_SOURCE = "(?<major>0|[1-9]\\d*)\\.(?<minor>0|[1-9]\\d*)\\.(?<patch>0|[1-9]\\d*)(?:-(?<preRelease>(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+(?<build>[0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?";
+
+// Anchored (^...$) so the whole string must match, e.g. "junk1.2.3" or "1.2.3-" are rejected
+// rather than matched via an embedded substring.
+const VERSION_REGEX = new RegExp(`^${VERSION_PATTERN_SOURCE}$`);
 
 export class Version {
     static unreleased: Version = new Version(0, 0, 0);
