@@ -86,6 +86,21 @@ export function configFileContent(config: ManifestConfig): string {
     return JSON.stringify(config, null, 2);
 }
 
+// Seeds the commit that will be referenced as `migration.cutoverCommit` (see manifestConfig.ts and README.md,
+// "Migrating an existing repository to multiple components"), deliberately as its OWN commit rather than the
+// same commit that adds `release-svp-config.json`. Two reasons:
+//  1. A commit's sha can't be known before it's created, so a config committed in the very same commit could
+//     never reference its own sha — seeding the cutover as an earlier, already-known commit sidesteps that
+//     entirely (and mirrors a realistic rollout: land the reorganization first, then add the config pointing at
+//     it, in a follow-up commit).
+//  2. `determineReleaseContext`'s legacy-anchor cutover truncation (see determineReleaseContext.ts,
+//     `truncateAtCutover`) requires `cutoverCommit` to be reachable strictly *between* the legacy anchor tag and
+//     the current branch head — i.e. a later, distinct commit from whatever commit the anchor tag itself points
+//     at. Reusing the anchor tag's own commit as `cutoverCommit` throws `MigrationCutoverNotFoundError`.
+export function seedCutoverCommit(state: RepoState, files: Record<string, string>): string {
+    return state.seedCommit({ message: "chore: scaffold multi-component layout", files });
+}
+
 // A commit message prefixed like a conventional commit — this is purely cosmetic (changelog entry text/PR
 // title copy); it plays NO role in version-bump classification. See `mergeLabeledPullRequest` below for what
 // actually drives a bump.
