@@ -348,16 +348,33 @@ function handleGraphQl(state: RepoState, query: string, variables: Record<string
     }
 }
 
-function handleLatestTags(state: RepoState) {
+// Slices a full, already-ordered list into one GraphQL connection page, honoring the `count`/`cursor`
+// variables release-svp's iterators send (see `paginate` in src/github.ts) — the fake's cursor is simply the
+// number of items already returned, opaque to callers exactly like a real Relay cursor. Shared by every
+// paginated query below so a genuine multi-page fixture (11+ tags/pull requests) exercises the same follow-up-
+// request pagination path a real run against GitHub would.
+function paginateList<T>(items: T[], variables: Record<string, any>): { page: T[]; pageInfo: { hasNextPage: boolean; endCursor?: string } } {
+    const count: number = variables.count ?? items.length;
+    const start = variables.cursor ? Number(variables.cursor) : 0;
+    const page = items.slice(start, start + count);
+    const end = start + page.length;
+    return {
+        page,
+        pageInfo: { hasNextPage: end < items.length, endCursor: end < items.length ? String(end) : undefined },
+    };
+}
+
+function handleLatestTags(state: RepoState, variables: Record<string, any>) {
     const tags = [...state.tags.values()].sort((a, b) => b.committedDate.localeCompare(a.committedDate));
+    const { page, pageInfo } = paginateList(tags, variables);
     return {
         repository: {
             refs: {
-                nodes: tags.map(tag => ({
+                nodes: page.map(tag => ({
                     name: tag.name,
                     target: { oid: tag.commitSha, committedDate: tag.committedDate, messageHeadline: state.commits.get(tag.commitSha)?.message ?? "" },
                 })),
-                pageInfo: { hasNextPage: false, endCursor: undefined },
+                pageInfo,
             },
         },
     };
@@ -386,12 +403,13 @@ function walkHistory(state: RepoState, targetBranch: string): ReturnType<RepoSta
 function handlePullRequestsSince(state: RepoState, variables: Record<string, any>) {
     const history = walkHistory(state, variables.targetBranch);
     const associatedPrByMergeSha = new Map(state.pullRequests.filter(pr => pr.mergeCommitSha).map(pr => [pr.mergeCommitSha, pr]));
+    const { page, pageInfo } = paginateList(history, variables);
     return {
         repository: {
             ref: {
                 target: {
                     history: {
-                        nodes: history.map(commit => {
+                        nodes: page.map(commit => {
                             const pr = associatedPrByMergeSha.get(commit.sha);
                             return {
                                 sha: commit.sha,
@@ -399,7 +417,7 @@ function handlePullRequestsSince(state: RepoState, variables: Record<string, any
                                 associatedPullRequests: { nodes: pr ? [toGraphQlPullRequest(pr)] : [] },
                             };
                         }),
-                        pageInfo: { hasNextPage: false, endCursor: undefined },
+                        pageInfo,
                     },
                 },
             },
@@ -424,11 +442,12 @@ function handleMergedPullRequests(state: RepoState, variables: Record<string, an
         }
         return false;
     });
+    const { page, pageInfo } = paginateList(matches, variables);
     return {
         repository: {
             pullRequests: {
-                nodes: matches.map(toGraphQlPullRequest),
-                pageInfo: { hasNextPage: false, endCursor: undefined },
+                nodes: page.map(toGraphQlPullRequest),
+                pageInfo,
             },
         },
     };

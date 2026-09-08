@@ -68,6 +68,14 @@ export function cargoToml(packageName: string, version: string): string {
     return `[package]\nname = "${packageName}"\nversion = "${version}"\nedition = "2021"\n`;
 }
 
+// Minimal `Cargo.lock` content with a single `[[package]]` entry — `RustStrategy` only updates a lockfile that
+// already exists (`createIfMissing: false`, see strategies/rust.ts), and `CargoLock`'s updater only bumps a
+// package entry whose `name` matches the component's own `Cargo.toml` package name (see
+// updaters/rust/cargoLock.ts), so `packageName` here must match whatever `cargoToml`/`componentFiles` used.
+export function cargoLock(packageName: string, version: string): string {
+    return `[[package]]\nname = "${packageName}"\nversion = "${version}"\n`;
+}
+
 // Builds the file snapshot a component needs to exist *before* its first release (a `Cargo.toml` at its own
 // path) — merge this into a `seedCommit({ files: ... })` call alongside any other components' files and the
 // config file itself (see `configFileContent`).
