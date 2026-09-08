@@ -13,6 +13,7 @@ import { ConcurrencyLimit } from "./concurrencyLimit";
 import latestTagsQuery from "./graphql/latestTags.graphql";
 import mergedPullRequestsQuery from "./graphql/mergedPullRequests.graphql";
 import pullRequestFilesQuery from "./graphql/pullRequestFiles.graphql";
+import pullRequestLabelsQuery from "./graphql/pullRequestLabels.graphql";
 import pullRequestsSinceQuery from "./graphql/pullRequestsSince.graphql";
 import { Logger } from "./logger";
 import { Release } from "./release";
@@ -44,6 +45,27 @@ export class PullRequestFilesIncompleteError extends Error {
     }
 }
 
+// Mirrors MAX_ADDITIONAL_CHANGED_FILE_PAGES, but for labels: 20 additional pages of 100 covers pull requests
+// with up to 2,100 labels (counting the first page already included in the bulk query), comfortably more than
+// any real pull request could ever carry.
+const MAX_ADDITIONAL_LABEL_PAGES = 20;
+
+// Mirrors MAX_CONCURRENT_CHANGED_FILE_PAGINATIONS, but for the label follow-up pagination below.
+const MAX_CONCURRENT_LABEL_PAGINATIONS = 2;
+
+// Thrown when a pull request's full label list cannot be obtained (pagination exhausted the safety limit, or a
+// follow-up request failed/returned malformed pagination data). Labels drive both version-bump classification
+// and release-pull-request identification (see versioningStrategy.ts, determineReleases.ts) — silently
+// proceeding with a truncated label list risks misclassifying a pull request (e.g. missing a "feat"/"!" label
+// past the first page) exactly as badly as guessing from a partial changed-file list would — see
+// extractLabels/fetchRemainingLabels.
+export class PullRequestLabelsIncompleteError extends Error {
+    constructor(message: string, options?: { cause?: unknown }) {
+        super(message, options);
+        this.name = "PullRequestLabelsIncompleteError";
+    }
+}
+
 export class Github {
     private readonly repository: Repository;
     private readonly octokit: Octokit;
@@ -51,6 +73,8 @@ export class Github {
     private readonly fileCache: RepositoryFileCache;
     // Shared across every call the instance makes (not per fetched page) — see MAX_CONCURRENT_CHANGED_FILE_PAGINATIONS.
     private readonly changedFilesPaginationLimit = new ConcurrencyLimit(MAX_CONCURRENT_CHANGED_FILE_PAGINATIONS);
+    // Shared across every call the instance makes (not per fetched page) — see MAX_CONCURRENT_LABEL_PAGINATIONS.
+    private readonly labelsPaginationLimit = new ConcurrencyLimit(MAX_CONCURRENT_LABEL_PAGINATIONS);
     // Repo-wide tags and a branch's merge commits are identical for every component (neither query is scoped to
     // one component) — one `ManifestRunner` run calls `tagIterator`/`mergeCommitIterator` once per configured
     // component (see manifestRunner.ts, determineReleaseContext.ts, determineReleases.ts), so without this cache
@@ -179,7 +203,7 @@ export class Github {
                 headBranchName: associatedPullRequest.headRefName,
                 baseBranchName: associatedPullRequest.baseRefName,
                 mergeCommitOid: associatedPullRequest.mergeCommit?.oid,
-                labels: associatedPullRequest.labels.nodes.map(node => node.name),
+                labels: await this.extractLabels(associatedPullRequest, associatedPullRequest.number),
                 ...await this.extractChangedFilePaths(associatedPullRequest, associatedPullRequest.number),
             } : undefined;
 
@@ -326,7 +350,7 @@ export class Github {
                     headBranchName: pullRequest.headRefName,
                     baseBranchName: pullRequest.baseRefName,
                     mergeCommitOid: pullRequest.mergeCommit?.oid,
-                    labels: (pullRequest.labels?.nodes || []).map(l => l.name),
+                    labels: await this.extractLabels(pullRequest, pullRequest.number),
                     ...await this.extractChangedFilePaths(pullRequest, pullRequest.number),
                 };
             })),
@@ -417,6 +441,90 @@ export class Github {
         return {
             data: (files.nodes || []).map((node: { path: string }) => node.path),
             pageInfo: files.pageInfo,
+        };
+    }
+
+    // Extracts the full label list for a pull request, following GraphQL cursor pagination beyond the bulk
+    // query's first page of 100 (see fetchRemainingLabels) whenever the pull request carries more labels than
+    // that. Throws PullRequestLabelsIncompleteError if the complete list cannot be obtained — callers must not
+    // guess version-bump type or release-pull-request identity from a partial label list (see
+    // determineReleases.ts, versioningStrategy.ts): silently proceeding as if an under-fetched label list were
+    // complete risks the exact same kind of misclassification that an under-fetched file list would for
+    // component ownership.
+    private async extractLabels(pullRequest: GraphQLPullRequest, pullRequestNumber: number): Promise<string[]> {
+        const firstPageLabels = pullRequest.labels.nodes.map(node => node.name);
+        if (!pullRequest.labels.pageInfo.hasNextPage) {
+            return firstPageLabels;
+        }
+
+        const firstCursor = pullRequest.labels.pageInfo.endCursor;
+        if (!firstCursor) {
+            throw new PullRequestLabelsIncompleteError(`Pull request #${pullRequestNumber} has more labels than fit on one page, but no pagination cursor was returned`);
+        }
+
+        return this.labelsPaginationLimit.run(() => this.fetchRemainingLabels(pullRequestNumber, firstPageLabels, firstCursor));
+    }
+
+    // Follows GraphQL cursor pagination to fetch every remaining page of a pull request's labels, beyond the
+    // first page already fetched by the bulk commit/PR query. Bounded by MAX_ADDITIONAL_LABEL_PAGES so a
+    // pathological response can't cause unbounded follow-up requests. If that limit is hit, a follow-up request
+    // fails outright, or a later page reports `hasNextPage` without an `endCursor` to follow, throws
+    // PullRequestLabelsIncompleteError rather than silently returning an incomplete label list as if it were
+    // complete — see extractLabels for why guessing here is unacceptable.
+    private async fetchRemainingLabels(pullRequestNumber: number, firstPageLabels: string[], firstCursor: string): Promise<string[]> {
+        const labels = [...firstPageLabels];
+        let cursor: string | undefined = firstCursor;
+        let pagesFetched = 0;
+
+        while (cursor !== undefined) {
+            if (pagesFetched === MAX_ADDITIONAL_LABEL_PAGES) {
+                const maxLabels = (MAX_ADDITIONAL_LABEL_PAGES + 1) * 100; // +1 for the first page already fetched
+                throw new PullRequestLabelsIncompleteError(`Pull request #${pullRequestNumber} has more than ${maxLabels} labels, giving up on pagination`);
+            }
+
+            let page: Response<string> | null;
+            try {
+                page = await this.pullRequestLabelsGraphQL(pullRequestNumber, cursor);
+            } catch (e) {
+                throw new PullRequestLabelsIncompleteError(`Failed to fetch all labels for pull request #${pullRequestNumber}`, { cause: e });
+            }
+            pagesFetched++;
+            if (!page) {
+                throw new PullRequestLabelsIncompleteError(`No response fetching additional labels for pull request #${pullRequestNumber}`);
+            }
+
+            labels.push(...page.data);
+            if (!page.pageInfo.hasNextPage) {
+                cursor = undefined;
+            } else if (!page.pageInfo.endCursor) {
+                throw new PullRequestLabelsIncompleteError(`Pull request #${pullRequestNumber} has more labels than fit on one page, but no pagination cursor was returned`);
+            } else {
+                cursor = page.pageInfo.endCursor;
+            }
+        }
+
+        return labels;
+    }
+
+    private async pullRequestLabelsGraphQL(pullRequestNumber: number, cursor: string): Promise<Response<string> | null> {
+        this.logger.debug(`Fetching additional labels for pull request #${pullRequestNumber} with cursor '${cursor}'...`);
+        const parameters = {
+            cursor,
+            owner: this.repository.owner,
+            repo: this.repository.repo,
+            number: pullRequestNumber,
+        };
+        const response: any = await this.octokit.graphql(pullRequestLabelsQuery, parameters);
+
+        if (!response?.repository?.pullRequest?.labels) {
+            this.logger.warn(`No response received for query: ${pullRequestLabelsQuery}`, parameters);
+            return null;
+        }
+
+        const labels = response.repository.pullRequest.labels;
+        return {
+            data: (labels.nodes || []).map((node: { name: string }) => node.name),
+            pageInfo: labels.pageInfo,
         };
     }
 
@@ -562,6 +670,10 @@ interface GraphQLPullRequest {
         nodes: {
             name: string;
         }[];
+        pageInfo: {
+            hasNextPage: boolean;
+            endCursor?: string;
+        };
     };
     mergeCommit?: {
         oid: string;

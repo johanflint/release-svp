@@ -329,7 +329,7 @@ function toPullRequestResponse(pr: ReturnType<RepoState["getPullRequestOrThrow"]
 
 // GraphQL queries are matched by name (the fixed set release-svp ships in src/graphql/*.graphql — see the
 // `query <name>(...)` declaration in each file) rather than by parsing/executing a real GraphQL schema, since
-// release-svp only ever sends these four specific documents.
+// release-svp only ever sends these five specific documents.
 function handleGraphQl(state: RepoState, query: string, variables: Record<string, any>): unknown {
     const name = /query\s+(\w+)/.exec(query)?.[1];
     switch (name) {
@@ -340,7 +340,9 @@ function handleGraphQl(state: RepoState, query: string, variables: Record<string
         case "mergedPullRequests":
             return handleMergedPullRequests(state, variables);
         case "pullRequestFiles":
-            return handlePullRequestFiles(state, variables);
+            return handlePullRequestFiles();
+        case "pullRequestLabels":
+            return handlePullRequestLabels();
         default:
             throw new Error(`Fake GitHub server received an unrecognized GraphQL query (no case for name '${name}') — add it to handleGraphQl in fakeGithub/server.ts.`);
     }
@@ -440,6 +442,12 @@ function handlePullRequestFiles() {
     throw new Error("Fake GitHub server does not implement pullRequestFiles pagination yet (no fixture needs >100 changed files per PR).");
 }
 
+function handlePullRequestLabels() {
+    // Mirrors handlePullRequestFiles above, but for labels (see fetchRemainingLabels in src/github.ts): none of
+    // the fake's fixtures produce PRs with >100 labels, so this path is intentionally unimplemented for now.
+    throw new Error("Fake GitHub server does not implement pullRequestLabels pagination yet (no fixture needs >100 labels per PR).");
+}
+
 function toGraphQlPullRequest(pr: ReturnType<RepoState["getPullRequestOrThrow"]>) {
     return {
         number: pr.number,
@@ -449,7 +457,7 @@ function toGraphQlPullRequest(pr: ReturnType<RepoState["getPullRequestOrThrow"]>
         baseRefName: pr.baseBranch,
         headRefName: pr.headBranch,
         mergeCommit: pr.mergeCommitSha ? { oid: pr.mergeCommitSha } : null,
-        labels: { nodes: pr.labels.map(name => ({ name })) },
+        labels: { nodes: pr.labels.map(name => ({ name })), pageInfo: { hasNextPage: false, endCursor: undefined } },
         files: { nodes: pr.changedFilePaths.map(path => ({ path })), pageInfo: { hasNextPage: false, endCursor: undefined } },
     };
 }

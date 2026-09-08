@@ -18,9 +18,13 @@ query pullRequestsSince($owner: String!, $repo: String!, $count: Int!, $targetBr
                                     mergeCommit {
                                         oid
                                     }
-                                    labels(first: 10) {
+                                    labels(first: 100) {
                                         nodes {
                                             name
+                                        }
+                                        pageInfo {
+                                            hasNextPage
+                                            endCursor
                                         }
                                     }
                                     files(first: 100) {

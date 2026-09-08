@@ -59,7 +59,7 @@ describe("Github", () => {
                                             headRefName: "head",
                                             baseRefName: "main",
                                             mergeCommit: { oid: "sha0" },
-                                            labels: { nodes: [] },
+                                            labels: { nodes: [], pageInfo: { hasNextPage: false } },
                                             files: {
                                                 nodes: [{ path: "a/something/Cargo.toml" }, { path: "a/something/src/lib.rs" }],
                                                 pageInfo: { hasNextPage: false },
@@ -118,7 +118,7 @@ describe("Github", () => {
                                                 headRefName: "head",
                                                 baseRefName: "main",
                                                 mergeCommit: { oid: "sha0" },
-                                                labels: { nodes: [] },
+                                                labels: { nodes: [], pageInfo: { hasNextPage: false } },
                                                 files: {
                                                     nodes: [{ path: "a/something/Cargo.toml" }],
                                                     pageInfo: { hasNextPage: true, endCursor: "cursor-page-1" },
@@ -168,7 +168,7 @@ describe("Github", () => {
                                                 headRefName: "head",
                                                 baseRefName: "main",
                                                 mergeCommit: { oid: "sha0" },
-                                                labels: { nodes: [] },
+                                                labels: { nodes: [], pageInfo: { hasNextPage: false } },
                                                 files: {
                                                     nodes: [{ path: "a/something/Cargo.toml" }],
                                                     pageInfo: { hasNextPage: true, endCursor: "cursor-page-1" },
@@ -231,7 +231,7 @@ describe("Github", () => {
                                                 headRefName: "head",
                                                 baseRefName: "main",
                                                 mergeCommit: { oid: "sha0" },
-                                                labels: { nodes: [] },
+                                                labels: { nodes: [], pageInfo: { hasNextPage: false } },
                                                 files: {
                                                     nodes: [{ path: "a/something/Cargo.toml" }],
                                                     pageInfo: { hasNextPage: true, endCursor: "cursor-page-1" },
@@ -293,7 +293,7 @@ describe("Github", () => {
                                                 headRefName: "head",
                                                 baseRefName: "main",
                                                 mergeCommit: { oid: "sha0" },
-                                                labels: { nodes: [] },
+                                                labels: { nodes: [], pageInfo: { hasNextPage: false } },
                                                 files: {
                                                     nodes: [{ path: "a/something/Cargo.toml" }],
                                                     pageInfo: { hasNextPage: true, endCursor: "cursor-page-1" },
@@ -400,6 +400,119 @@ describe("Github", () => {
             await expect(drain()).rejects.toThrow("boom");
             expect(graphqlMock).toHaveBeenCalledTimes(1);
         });
+
+        it("follows pagination and merges all labels when a pull request has more labels than fit on one page", async () => {
+            // Regression test: a release-relevant label (e.g. "autorelease: pending (1.2.3)") landing on the
+            // second page must not be silently dropped just because the bulk query's first page of labels was full.
+            graphqlMock.mockImplementation(async (_query: string, parameters: any) => {
+                if (parameters.number !== undefined) {
+                    expect(parameters.cursor).toBe("label-cursor-page-1");
+                    return {
+                        repository: {
+                            pullRequest: {
+                                labels: {
+                                    nodes: [{ name: "autorelease: pending (1.2.3)" }],
+                                    pageInfo: { hasNextPage: false, endCursor: undefined },
+                                },
+                            },
+                        },
+                    };
+                }
+
+                return {
+                    repository: {
+                        ref: {
+                            target: {
+                                history: {
+                                    nodes: [{
+                                        sha: "sha0",
+                                        message: "Merge PR #1",
+                                        associatedPullRequests: {
+                                            nodes: [{
+                                                number: 1,
+                                                title: "PR",
+                                                body: "body",
+                                                permalink: "permalink",
+                                                headRefName: "head",
+                                                baseRefName: "main",
+                                                mergeCommit: { oid: "sha0" },
+                                                labels: {
+                                                    nodes: [{ name: "size/xl" }],
+                                                    pageInfo: { hasNextPage: true, endCursor: "label-cursor-page-1" },
+                                                },
+                                                files: { nodes: [], pageInfo: { hasNextPage: false } },
+                                            }],
+                                        },
+                                    }],
+                                    pageInfo: { hasNextPage: false, endCursor: undefined },
+                                },
+                            },
+                        },
+                    },
+                };
+            });
+
+            const logger = createLogger();
+            const github = new Github({ owner: "owner", repo: "repo" }, "token", logger);
+            const commits = [];
+            for await (const commit of github.mergeCommitIterator("main")) {
+                commits.push(commit);
+            }
+
+            expect(commits[0].pullRequest?.labels).toEqual(["size/xl", "autorelease: pending (1.2.3)"]);
+            expect(logger.warn).not.toHaveBeenCalled();
+        });
+
+        it("rejects when label follow-up pagination fails", async () => {
+            graphqlMock.mockImplementation(async (_query: string, parameters: any) => {
+                if (parameters.number !== undefined) {
+                    throw new Error("boom");
+                }
+
+                return {
+                    repository: {
+                        ref: {
+                            target: {
+                                history: {
+                                    nodes: [{
+                                        sha: "sha0",
+                                        message: "Merge PR #1",
+                                        associatedPullRequests: {
+                                            nodes: [{
+                                                number: 1,
+                                                title: "PR",
+                                                body: "body",
+                                                permalink: "permalink",
+                                                headRefName: "head",
+                                                baseRefName: "main",
+                                                mergeCommit: { oid: "sha0" },
+                                                labels: {
+                                                    nodes: [{ name: "size/xl" }],
+                                                    pageInfo: { hasNextPage: true, endCursor: "label-cursor-page-1" },
+                                                },
+                                                files: { nodes: [], pageInfo: { hasNextPage: false } },
+                                            }],
+                                        },
+                                    }],
+                                    pageInfo: { hasNextPage: false, endCursor: undefined },
+                                },
+                            },
+                        },
+                    },
+                };
+            });
+
+            const github = new Github({ owner: "owner", repo: "repo" }, "token", createLogger());
+            const collect = async () => {
+                const commits = [];
+                for await (const commit of github.mergeCommitIterator("main")) {
+                    commits.push(commit);
+                }
+                return commits;
+            };
+
+            await expect(collect()).rejects.toThrow("Failed to fetch all labels for pull request #1");
+        });
     });
 
     describe("#tagIterator", () => {
@@ -461,7 +574,7 @@ describe("Github", () => {
                             title: "PR",
                             baseRefName: "main",
                             headRefName: "release-svp--branches-main",
-                            labels: { nodes: [{ name: "autorelease: pending" }] },
+                            labels: { nodes: [{ name: "autorelease: pending" }], pageInfo: { hasNextPage: false } },
                             body: "body",
                             permalink: "permalink",
                             mergeCommit: { oid: "sha0" },
@@ -500,7 +613,7 @@ describe("Github", () => {
                                     title: "PR",
                                     baseRefName: "main",
                                     headRefName: "release-svp--branches-main",
-                                    labels: { nodes: [] },
+                                    labels: { nodes: [], pageInfo: { hasNextPage: false } },
                                     body: "body",
                                     permalink: "permalink",
                                     mergeCommit: { oid: `sha${number}` },
@@ -563,5 +676,113 @@ describe("Github", () => {
                 ["a/file-3.rs", "a/file-3-more.rs"],
             ]);
         });
+
+        it("follows pagination and merges all labels when a pull request has more labels than fit on one page", async () => {
+            // Regression test for the bug this fix addresses: with a bare `labels(first: 10)` query and no
+            // pagination, a release-relevant label on the second page (here "autorelease: pending (1.2.3)") used
+            // to be silently dropped, which could misclassify or entirely hide a component's pending release PR.
+            graphqlMock.mockImplementation(async (_query: string, parameters: any) => {
+                if (parameters.number !== undefined) {
+                    expect(parameters.cursor).toBe("label-cursor-page-1");
+                    return {
+                        repository: {
+                            pullRequest: {
+                                labels: {
+                                    nodes: [{ name: "autorelease: pending (1.2.3)" }],
+                                    pageInfo: { hasNextPage: false, endCursor: undefined },
+                                },
+                            },
+                        },
+                    };
+                }
+
+                return {
+                    repository: {
+                        pullRequests: {
+                            nodes: [{
+                                number: 4,
+                                title: "PR",
+                                baseRefName: "main",
+                                headRefName: "release-svp--branches-main",
+                                labels: {
+                                    nodes: [{ name: "size/xl" }],
+                                    pageInfo: { hasNextPage: true, endCursor: "label-cursor-page-1" },
+                                },
+                                body: "body",
+                                permalink: "permalink",
+                                mergeCommit: { oid: "sha0" },
+                                files: { nodes: [], pageInfo: { hasNextPage: false } },
+                            }],
+                            pageInfo: { endCursor: undefined, hasNextPage: false },
+                        },
+                    },
+                };
+            });
+
+            const logger = createLogger();
+            const github = new Github({ owner: "owner", repo: "repo" }, "token", logger);
+            const pullRequests = [];
+            for await (const pullRequest of github.pullRequestIterator("main", "MERGED")) {
+                pullRequests.push(pullRequest);
+            }
+
+            expect(pullRequests).toHaveLength(1);
+            expect(pullRequests[0].labels).toEqual(["size/xl", "autorelease: pending (1.2.3)"]);
+            expect(logger.warn).not.toHaveBeenCalled();
+        });
+
+        it("rejects when a pull request's label pagination hits the safety limit", async () => {
+            let pagesFetched = 0;
+            graphqlMock.mockImplementation(async (_query: string, parameters: any) => {
+                if (parameters.number !== undefined) {
+                    pagesFetched++;
+                    return {
+                        repository: {
+                            pullRequest: {
+                                labels: {
+                                    nodes: [{ name: `label-${pagesFetched}` }],
+                                    pageInfo: { hasNextPage: true, endCursor: `label-cursor-${pagesFetched}` },
+                                },
+                            },
+                        },
+                    };
+                }
+
+                return {
+                    repository: {
+                        pullRequests: {
+                            nodes: [{
+                                number: 4,
+                                title: "PR",
+                                baseRefName: "main",
+                                headRefName: "release-svp--branches-main",
+                                labels: {
+                                    nodes: [{ name: "size/xl" }],
+                                    pageInfo: { hasNextPage: true, endCursor: "label-cursor-page-1" },
+                                },
+                                body: "body",
+                                permalink: "permalink",
+                                mergeCommit: { oid: "sha0" },
+                                files: { nodes: [], pageInfo: { hasNextPage: false } },
+                            }],
+                            pageInfo: { endCursor: undefined, hasNextPage: false },
+                        },
+                    },
+                };
+            });
+
+            const github = new Github({ owner: "owner", repo: "repo" }, "token", createLogger());
+            const collect = async () => {
+                const pullRequests = [];
+                for await (const pullRequest of github.pullRequestIterator("main", "MERGED")) {
+                    pullRequests.push(pullRequest);
+                }
+                return pullRequests;
+            };
+
+            await expect(collect()).rejects.toThrow("giving up on pagination");
+            expect(pagesFetched).toBe(20);
+        });
     });
 });
+
