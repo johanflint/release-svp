@@ -7,7 +7,7 @@ query pullRequestsSince($owner: String!, $repo: String!, $count: Int!, $targetBr
                         nodes {
                             sha: oid
                             message
-                            associatedPullRequests(first: 10) {
+                            associatedPullRequests(first: 100) {
                                 nodes {
                                     number
                                     title
