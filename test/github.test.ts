@@ -65,6 +65,7 @@ describe("Github", () => {
                                                 pageInfo: { hasNextPage: false },
                                             },
                                         }],
+                                        pageInfo: { hasNextPage: false, endCursor: undefined },
                                     },
                                 }],
                                 pageInfo: { hasNextPage: false, endCursor: undefined },
@@ -124,6 +125,7 @@ describe("Github", () => {
                                                     pageInfo: { hasNextPage: true, endCursor: "cursor-page-1" },
                                                 },
                                             }],
+                                            pageInfo: { hasNextPage: false, endCursor: undefined },
                                         },
                                     }],
                                     pageInfo: { hasNextPage: false, endCursor: undefined },
@@ -175,6 +177,7 @@ describe("Github", () => {
                                                         pageInfo: { hasNextPage: true, endCursor: `cursor-${number}` },
                                                     },
                                                 }],
+                                                pageInfo: { hasNextPage: false, endCursor: undefined },
                                             },
                                         })),
                                         pageInfo: { hasNextPage: false, endCursor: undefined },
@@ -263,6 +266,7 @@ describe("Github", () => {
                                                     pageInfo: { hasNextPage: true, endCursor: "cursor-page-1" },
                                                 },
                                             }],
+                                            pageInfo: { hasNextPage: false, endCursor: undefined },
                                         },
                                     }],
                                     pageInfo: { hasNextPage: false, endCursor: undefined },
@@ -326,6 +330,7 @@ describe("Github", () => {
                                                     pageInfo: { hasNextPage: true, endCursor: "cursor-page-1" },
                                                 },
                                             }],
+                                            pageInfo: { hasNextPage: false, endCursor: undefined },
                                         },
                                     }],
                                     pageInfo: { hasNextPage: false, endCursor: undefined },
@@ -388,6 +393,7 @@ describe("Github", () => {
                                                     pageInfo: { hasNextPage: true, endCursor: "cursor-page-1" },
                                                 },
                                             }],
+                                            pageInfo: { hasNextPage: false, endCursor: undefined },
                                         },
                                     }],
                                     pageInfo: { hasNextPage: false, endCursor: undefined },
@@ -416,7 +422,7 @@ describe("Github", () => {
                     ref: {
                         target: {
                             history: {
-                                nodes: [{ sha: "sha0", message: "Merge PR #1", associatedPullRequests: { nodes: [] } }],
+                                nodes: [{ sha: "sha0", message: "Merge PR #1", associatedPullRequests: { nodes: [], pageInfo: { hasNextPage: false, endCursor: undefined } } }],
                                 pageInfo: { hasNextPage: false, endCursor: undefined },
                             },
                         },
@@ -446,7 +452,7 @@ describe("Github", () => {
                     ref: {
                         target: {
                             history: {
-                                nodes: [{ sha: `sha-${parameters.targetBranch}`, message: "Merge PR #1", associatedPullRequests: { nodes: [] } }],
+                                nodes: [{ sha: `sha-${parameters.targetBranch}`, message: "Merge PR #1", associatedPullRequests: { nodes: [], pageInfo: { hasNextPage: false, endCursor: undefined } } }],
                                 pageInfo: { hasNextPage: false, endCursor: undefined },
                             },
                         },
@@ -531,6 +537,7 @@ describe("Github", () => {
                                                 },
                                                 files: { nodes: [], pageInfo: { hasNextPage: false } },
                                             }],
+                                            pageInfo: { hasNextPage: false, endCursor: undefined },
                                         },
                                     }],
                                     pageInfo: { hasNextPage: false, endCursor: undefined },
@@ -581,6 +588,7 @@ describe("Github", () => {
                                                 },
                                                 files: { nodes: [], pageInfo: { hasNextPage: false } },
                                             }],
+                                            pageInfo: { hasNextPage: false, endCursor: undefined },
                                         },
                                     }],
                                     pageInfo: { hasNextPage: false, endCursor: undefined },
@@ -601,6 +609,134 @@ describe("Github", () => {
             };
 
             await expect(collect()).rejects.toThrow("Failed to fetch all labels for pull request #1");
+        });
+
+        it("follows pagination and still finds the merge-matching pull request when it falls past the first page of associated pull requests", async () => {
+            // Regression test for the bug this fix addresses: with a bare `associatedPullRequests(first: 10)`
+            // query and no pagination, a commit whose real merge-matching pull request (mergeCommit.oid ===
+            // commit.sha) fell outside the first page used to leave `mergePullRequest` undefined, silently
+            // treating a genuine merge commit as if it weren't one at all — skipping its label-driven version
+            // bump entirely, rather than reading wrong data.
+            graphqlMock.mockImplementation(async (_query: string, parameters: any) => {
+                if (parameters.sha !== undefined) {
+                    expect(parameters.sha).toBe("sha0");
+                    expect(parameters.cursor).toBe("associated-pr-cursor-page-1");
+                    return {
+                        repository: {
+                            object: {
+                                associatedPullRequests: {
+                                    nodes: [{
+                                        number: 2,
+                                        title: "PR 2",
+                                        body: "body 2",
+                                        permalink: "permalink-2",
+                                        headRefName: "head-2",
+                                        baseRefName: "main",
+                                        mergeCommit: { oid: "sha0" },
+                                        labels: { nodes: [{ name: "feature" }], pageInfo: { hasNextPage: false } },
+                                        files: { nodes: [], pageInfo: { hasNextPage: false } },
+                                    }],
+                                    pageInfo: { hasNextPage: false, endCursor: undefined },
+                                },
+                            },
+                        },
+                    };
+                }
+
+                return {
+                    repository: {
+                        ref: {
+                            target: {
+                                history: {
+                                    nodes: [{
+                                        sha: "sha0",
+                                        message: "Merge PR #2",
+                                        associatedPullRequests: {
+                                            // Page 1: an unrelated pull request that just happens to reference this
+                                            // commit (e.g. a backport/cherry-pick), NOT the one that merged it.
+                                            nodes: [{
+                                                number: 1,
+                                                title: "PR 1",
+                                                body: "body 1",
+                                                permalink: "permalink-1",
+                                                headRefName: "head-1",
+                                                baseRefName: "main",
+                                                mergeCommit: { oid: "some-other-sha" },
+                                                labels: { nodes: [], pageInfo: { hasNextPage: false } },
+                                                files: { nodes: [], pageInfo: { hasNextPage: false } },
+                                            }],
+                                            pageInfo: { hasNextPage: true, endCursor: "associated-pr-cursor-page-1" },
+                                        },
+                                    }],
+                                    pageInfo: { hasNextPage: false, endCursor: undefined },
+                                },
+                            },
+                        },
+                    },
+                };
+            });
+
+            const logger = createLogger();
+            const github = new Github({ owner: "owner", repo: "repo" }, "token", logger);
+            const commits = [];
+            for await (const commit of github.mergeCommitIterator("main")) {
+                commits.push(commit);
+            }
+
+            expect(commits).toHaveLength(1);
+            expect(commits[0].isMergeCommit).toBe(true);
+            expect(commits[0].pullRequest?.number).toBe(2);
+            expect(commits[0].pullRequest?.labels).toEqual(["feature"]);
+            expect(logger.warn).not.toHaveBeenCalled();
+        });
+
+        it("rejects when associated-pull-request follow-up pagination fails", async () => {
+            graphqlMock.mockImplementation(async (_query: string, parameters: any) => {
+                if (parameters.sha !== undefined) {
+                    throw new Error("boom");
+                }
+
+                return {
+                    repository: {
+                        ref: {
+                            target: {
+                                history: {
+                                    nodes: [{
+                                        sha: "sha0",
+                                        message: "Merge PR #1",
+                                        associatedPullRequests: {
+                                            nodes: [{
+                                                number: 1,
+                                                title: "PR",
+                                                body: "body",
+                                                permalink: "permalink",
+                                                headRefName: "head",
+                                                baseRefName: "main",
+                                                mergeCommit: { oid: "some-other-sha" },
+                                                labels: { nodes: [], pageInfo: { hasNextPage: false } },
+                                                files: { nodes: [], pageInfo: { hasNextPage: false } },
+                                            }],
+                                            pageInfo: { hasNextPage: true, endCursor: "associated-pr-cursor-page-1" },
+                                        },
+                                    }],
+                                    pageInfo: { hasNextPage: false, endCursor: undefined },
+                                },
+                            },
+                        },
+                    },
+                };
+            });
+
+            const github = new Github({ owner: "owner", repo: "repo" }, "token", createLogger());
+            const collect = async () => {
+                const commits = [];
+                for await (const commit of github.mergeCommitIterator("main")) {
+                    commits.push(commit);
+                }
+                return commits;
+            };
+
+            await expect(collect()).rejects.toThrow("Failed to fetch all associated pull requests for commit sha0");
         });
     });
 

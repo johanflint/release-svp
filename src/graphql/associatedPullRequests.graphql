@@ -1,0 +1,43 @@
+query associatedPullRequests($owner: String!, $repo: String!, $sha: GitObjectID!, $cursor: String) {
+    repository(owner: $owner, name: $repo) {
+        object(oid: $sha) {
+            ... on Commit {
+                associatedPullRequests(first: 100, after: $cursor) {
+                    nodes {
+                        number
+                        title
+                        body
+                        permalink
+                        headRefName
+                        baseRefName
+                        mergeCommit {
+                            oid
+                        }
+                        labels(first: 100) {
+                            nodes {
+                                name
+                            }
+                            pageInfo {
+                                hasNextPage
+                                endCursor
+                            }
+                        }
+                        files(first: 100) {
+                            nodes {
+                                path
+                            }
+                            pageInfo {
+                                hasNextPage
+                                endCursor
+                            }
+                        }
+                    }
+                    pageInfo {
+                        hasNextPage
+                        endCursor
+                    }
+                }
+            }
+        }
+    }
+}

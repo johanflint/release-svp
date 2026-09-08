@@ -10,6 +10,7 @@ import { Octokit, RequestError } from "octokit";
 import { RequestError as RequestErrorBody } from "@octokit/types";
 import { Commit, PullRequest } from "./commit";
 import { ConcurrencyLimit } from "./concurrencyLimit";
+import associatedPullRequestsQuery from "./graphql/associatedPullRequests.graphql";
 import latestTagsQuery from "./graphql/latestTags.graphql";
 import mergedPullRequestsQuery from "./graphql/mergedPullRequests.graphql";
 import pullRequestFilesQuery from "./graphql/pullRequestFiles.graphql";
@@ -66,6 +67,28 @@ export class PullRequestLabelsIncompleteError extends Error {
     }
 }
 
+// Mirrors MAX_ADDITIONAL_LABEL_PAGES, but for a commit's associated pull requests: 20 additional pages of 100
+// covers up to 2,100 pull requests associated with a single commit (counting the first page already included
+// in the bulk query) — a generous ceiling, since a commit legitimately having more than a handful of associated
+// pull requests (e.g. cherry-picks/backports referencing the same commit) is already unusual.
+const MAX_ADDITIONAL_ASSOCIATED_PULL_REQUEST_PAGES = 20;
+
+// Mirrors MAX_CONCURRENT_LABEL_PAGINATIONS, but for the associated-pull-request follow-up pagination below.
+const MAX_CONCURRENT_ASSOCIATED_PULL_REQUEST_PAGINATIONS = 2;
+
+// Thrown when a commit's full associated-pull-requests list cannot be obtained (pagination exhausted the
+// safety limit, or a follow-up request failed/returned malformed pagination data). mergeCommitsGraphQL uses
+// this list to find the pull request whose merge actually produced the commit (matching on mergeCommit.oid) —
+// silently proceeding with a truncated list risks missing that match for a commit whose real merge-matching
+// pull request fell past the first page, which would wrongly treat the commit as not a merge commit at all
+// (see mergeCommitsGraphQL's isMergeCommit) and silently skip its label-driven version bump.
+export class AssociatedPullRequestsIncompleteError extends Error {
+    constructor(message: string, options?: { cause?: unknown }) {
+        super(message, options);
+        this.name = "AssociatedPullRequestsIncompleteError";
+    }
+}
+
 export class Github {
     private readonly repository: Repository;
     private readonly octokit: Octokit;
@@ -75,6 +98,8 @@ export class Github {
     private readonly changedFilesPaginationLimit = new ConcurrencyLimit(MAX_CONCURRENT_CHANGED_FILE_PAGINATIONS);
     // Shared across every call the instance makes (not per fetched page) — see MAX_CONCURRENT_LABEL_PAGINATIONS.
     private readonly labelsPaginationLimit = new ConcurrencyLimit(MAX_CONCURRENT_LABEL_PAGINATIONS);
+    // Shared across every call the instance makes (not per fetched page) — see MAX_CONCURRENT_ASSOCIATED_PULL_REQUEST_PAGINATIONS.
+    private readonly associatedPullRequestsPaginationLimit = new ConcurrencyLimit(MAX_CONCURRENT_ASSOCIATED_PULL_REQUEST_PAGINATIONS);
     // Repo-wide tags and a branch's merge commits are identical for every component (neither query is scoped to
     // one component) — one `ManifestRunner` run calls `tagIterator`/`mergeCommitIterator` once per configured
     // component (see manifestRunner.ts, determineReleaseContext.ts, determineReleases.ts), so without this cache
@@ -192,8 +217,9 @@ export class Github {
         const commits = (history.nodes || []) as GraphQLCommit[];
 
         const mappedCommits = await Promise.all(commits.map<Promise<Commit>>(async commit => {
-            const mergePullRequest = commit.associatedPullRequests.nodes.find(pr => pr.mergeCommit?.oid === commit.sha);
-            const associatedPullRequest = mergePullRequest || commit.associatedPullRequests.nodes[0];
+            const associatedPullRequests = await this.extractAssociatedPullRequests(commit);
+            const mergePullRequest = associatedPullRequests.find(pr => pr.mergeCommit?.oid === commit.sha);
+            const associatedPullRequest = mergePullRequest || associatedPullRequests[0];
             const pullRequest: PullRequest | undefined = associatedPullRequest ? {
                 sha: commit.sha,
                 number: associatedPullRequest.number,
@@ -529,6 +555,88 @@ export class Github {
         };
     }
 
+    // Extracts a commit's full associated-pull-request node list, following GraphQL cursor pagination beyond
+    // the bulk query's first page of 100 (see fetchRemainingAssociatedPullRequests) whenever the commit has
+    // more associated pull requests than that. Throws AssociatedPullRequestsIncompleteError if the complete
+    // list cannot be obtained — mergeCommitsGraphQL must not guess which pull request actually merged this
+    // commit from a partial list (see AssociatedPullRequestsIncompleteError for why).
+    private async extractAssociatedPullRequests(commit: GraphQLCommit): Promise<GraphQLPullRequest[]> {
+        const firstPageNodes = commit.associatedPullRequests.nodes;
+        if (!commit.associatedPullRequests.pageInfo.hasNextPage) {
+            return firstPageNodes;
+        }
+
+        const firstCursor = commit.associatedPullRequests.pageInfo.endCursor;
+        if (!firstCursor) {
+            throw new AssociatedPullRequestsIncompleteError(`Commit ${commit.sha} has more associated pull requests than fit on one page, but no pagination cursor was returned`);
+        }
+
+        return this.associatedPullRequestsPaginationLimit.run(() => this.fetchRemainingAssociatedPullRequests(commit.sha, firstPageNodes, firstCursor));
+    }
+
+    // Follows GraphQL cursor pagination to fetch every remaining page of a commit's associated pull requests,
+    // beyond the first page already fetched by the bulk commit query. Bounded by
+    // MAX_ADDITIONAL_ASSOCIATED_PULL_REQUEST_PAGES so a pathological response can't cause unbounded follow-up
+    // requests. If that limit is hit, a follow-up request fails outright, or a later page reports
+    // `hasNextPage` without an `endCursor` to follow, throws AssociatedPullRequestsIncompleteError rather than
+    // silently returning an incomplete list as if it were complete — see extractAssociatedPullRequests.
+    private async fetchRemainingAssociatedPullRequests(sha: string, firstPageNodes: GraphQLPullRequest[], firstCursor: string): Promise<GraphQLPullRequest[]> {
+        const nodes = [...firstPageNodes];
+        let cursor: string | undefined = firstCursor;
+        let pagesFetched = 0;
+
+        while (cursor !== undefined) {
+            if (pagesFetched === MAX_ADDITIONAL_ASSOCIATED_PULL_REQUEST_PAGES) {
+                const maxPullRequests = (MAX_ADDITIONAL_ASSOCIATED_PULL_REQUEST_PAGES + 1) * 100; // +1 for the first page already fetched
+                throw new AssociatedPullRequestsIncompleteError(`Commit ${sha} has more than ${maxPullRequests} associated pull requests, giving up on pagination`);
+            }
+
+            let page: Response<GraphQLPullRequest> | null;
+            try {
+                page = await this.associatedPullRequestsGraphQL(sha, cursor);
+            } catch (e) {
+                throw new AssociatedPullRequestsIncompleteError(`Failed to fetch all associated pull requests for commit ${sha}`, { cause: e });
+            }
+            pagesFetched++;
+            if (!page) {
+                throw new AssociatedPullRequestsIncompleteError(`No response fetching additional associated pull requests for commit ${sha}`);
+            }
+
+            nodes.push(...page.data);
+            if (!page.pageInfo.hasNextPage) {
+                cursor = undefined;
+            } else if (!page.pageInfo.endCursor) {
+                throw new AssociatedPullRequestsIncompleteError(`Commit ${sha} has more associated pull requests than fit on one page, but no pagination cursor was returned`);
+            } else {
+                cursor = page.pageInfo.endCursor;
+            }
+        }
+
+        return nodes;
+    }
+
+    private async associatedPullRequestsGraphQL(sha: string, cursor: string): Promise<Response<GraphQLPullRequest> | null> {
+        this.logger.debug(`Fetching additional associated pull requests for commit ${sha} with cursor '${cursor}'...`);
+        const parameters = {
+            cursor,
+            owner: this.repository.owner,
+            repo: this.repository.repo,
+            sha,
+        };
+        const response: any = await this.octokit.graphql(associatedPullRequestsQuery, parameters);
+
+        if (!response?.repository?.object?.associatedPullRequests) {
+            this.logger.warn(`No response received for query: ${associatedPullRequestsQuery}`, parameters);
+            return null;
+        }
+
+        const associatedPullRequests = response.repository.object.associatedPullRequests;
+        return {
+            data: (associatedPullRequests.nodes || []) as GraphQLPullRequest[],
+            pageInfo: associatedPullRequests.pageInfo,
+        };
+    }
+
     async retrieveFileContents(path: string, branch: string): Promise<GitHubFileContents> {
         this.logger.debug(`Fetching file '${path}' from branch '${branch}'...`);
         try {
@@ -657,6 +765,10 @@ interface GraphQLCommit {
     message: string;
     associatedPullRequests: {
         nodes: GraphQLPullRequest[];
+        pageInfo: {
+            hasNextPage: boolean;
+            endCursor?: string;
+        };
     };
 }
 

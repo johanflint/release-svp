@@ -329,7 +329,7 @@ function toPullRequestResponse(pr: ReturnType<RepoState["getPullRequestOrThrow"]
 
 // GraphQL queries are matched by name (the fixed set release-svp ships in src/graphql/*.graphql — see the
 // `query <name>(...)` declaration in each file) rather than by parsing/executing a real GraphQL schema, since
-// release-svp only ever sends these five specific documents.
+// release-svp only ever sends these six specific documents.
 function handleGraphQl(state: RepoState, query: string, variables: Record<string, any>): unknown {
     const name = /query\s+(\w+)/.exec(query)?.[1];
     switch (name) {
@@ -343,6 +343,8 @@ function handleGraphQl(state: RepoState, query: string, variables: Record<string
             return handlePullRequestFiles();
         case "pullRequestLabels":
             return handlePullRequestLabels();
+        case "associatedPullRequests":
+            return handleAssociatedPullRequests();
         default:
             throw new Error(`Fake GitHub server received an unrecognized GraphQL query (no case for name '${name}') — add it to handleGraphQl in fakeGithub/server.ts.`);
     }
@@ -414,7 +416,7 @@ function handlePullRequestsSince(state: RepoState, variables: Record<string, any
                             return {
                                 sha: commit.sha,
                                 message: commit.message,
-                                associatedPullRequests: { nodes: pr ? [toGraphQlPullRequest(pr)] : [] },
+                                associatedPullRequests: { nodes: pr ? [toGraphQlPullRequest(pr)] : [], pageInfo: { hasNextPage: false, endCursor: undefined } },
                             };
                         }),
                         pageInfo,
@@ -465,6 +467,13 @@ function handlePullRequestLabels() {
     // Mirrors handlePullRequestFiles above, but for labels (see fetchRemainingLabels in src/github.ts): none of
     // the fake's fixtures produce PRs with >100 labels, so this path is intentionally unimplemented for now.
     throw new Error("Fake GitHub server does not implement pullRequestLabels pagination yet (no fixture needs >100 labels per PR).");
+}
+
+function handleAssociatedPullRequests() {
+    // Mirrors handlePullRequestFiles above, but for a commit's associated pull requests (see
+    // fetchRemainingAssociatedPullRequests in src/github.ts): none of the fake's fixtures produce a commit with
+    // more than 100 associated pull requests, so this path is intentionally unimplemented for now.
+    throw new Error("Fake GitHub server does not implement associatedPullRequests pagination yet (no fixture needs >100 associated pull requests per commit).");
 }
 
 function toGraphQlPullRequest(pr: ReturnType<RepoState["getPullRequestOrThrow"]>) {
