@@ -182,14 +182,22 @@ function buildRoutes(state: RepoState): RouteMatch[] {
             pattern: new RegExp(`^${escapedRepoPath}/git/blobs/([0-9a-f]+)$`),
             handle: params => ({ sha: params[0], content: Buffer.from(state.getBlob(params[0]), "utf8").toString("base64"), encoding: "base64" }),
         },
-        // GET /repos/{owner}/{repo}/pulls?head=owner:branch
+        // GET /repos/{owner}/{repo}/pulls?head=owner:branch&state=open|closed|all
         {
             method: "GET",
             pattern: new RegExp(`^${escapedRepoPath}/pulls$`),
             handle: (_params, _body, url) => {
                 const head = url.searchParams.get("head");
                 const headBranch = head?.includes(":") ? head.split(":")[1] : head;
-                return state.pullRequests.filter(pr => !headBranch || pr.headBranch === headBranch).map(toPullRequestResponse);
+                // Real GitHub defaults this endpoint to `state=open` when the query omits it — code-suggester's
+                // own existing-PR reuse check (github/open-pull-request.js) relies on that default (it never
+                // passes `state` itself) to only ever find a still-open PR on the branch, never a previously
+                // merged/closed one from an earlier release cycle on that same, reused branch name.
+                const stateFilter = url.searchParams.get("state") ?? "open";
+                return state.pullRequests
+                    .filter(pr => !headBranch || pr.headBranch === headBranch)
+                    .filter(pr => stateFilter === "all" || pr.state === stateFilter)
+                    .map(pr => toPullRequestResponse(pr, state.owner));
             },
         },
         // POST /repos/{owner}/{repo}/pulls
@@ -199,20 +207,20 @@ function buildRoutes(state: RepoState): RouteMatch[] {
             handle: (_params, body) => {
                 const headBranch = (body.head as string).includes(":") ? (body.head as string).split(":")[1] : body.head;
                 const pr = state.createPullRequest({ title: body.title, body: body.body ?? "", headBranch, baseBranch: body.base });
-                return toPullRequestResponse(pr);
+                return toPullRequestResponse(pr, state.owner);
             },
         },
         // PATCH /repos/{owner}/{repo}/pulls/{number}
         {
             method: "PATCH",
             pattern: new RegExp(`^${escapedRepoPath}/pulls/(\\d+)$`),
-            handle: (params, body) => toPullRequestResponse(state.updatePullRequest(Number(params[0]), body)),
+            handle: (params, body) => toPullRequestResponse(state.updatePullRequest(Number(params[0]), body), state.owner),
         },
         // GET /repos/{owner}/{repo}/pulls/{number}
         {
             method: "GET",
             pattern: new RegExp(`^${escapedRepoPath}/pulls/(\\d+)$`),
-            handle: params => toPullRequestResponse(state.getPullRequestOrThrow(Number(params[0]))),
+            handle: params => toPullRequestResponse(state.getPullRequestOrThrow(Number(params[0])), state.owner),
         },
         // POST /repos/{owner}/{repo}/releases
         {
@@ -263,14 +271,18 @@ function buildRoutes(state: RepoState): RouteMatch[] {
     ];
 }
 
-function toPullRequestResponse(pr: ReturnType<RepoState["getPullRequestOrThrow"]>) {
+function toPullRequestResponse(pr: ReturnType<RepoState["getPullRequestOrThrow"]>, owner: string) {
     return {
         number: pr.number,
         title: pr.title,
         body: pr.body,
         state: pr.state,
         merged: pr.merged,
-        head: { ref: pr.headBranch, label: pr.headBranch },
+        // `label` must be "owner:branch" (matching real GitHub's REST API), not just the bare branch name —
+        // `code-suggester`'s own existing-PR reuse check (github/open-pull-request.js) matches on this exact
+        // format (`${origin.owner}:${origin.branch}`), so a bare branch name here would make it never find an
+        // already-open PR on the same branch and always create a duplicate instead of updating it.
+        head: { ref: pr.headBranch, label: `${owner}:${pr.headBranch}` },
         base: { ref: pr.baseBranch },
         labels: pr.labels.map(name => ({ name })),
         _links: { html: { href: `https://example.invalid/pull/${pr.number}` } },
