@@ -263,3 +263,18 @@ With this config:
 Note: if `cutoverCommit` isn't reachable from `targetBranch` (typo, or the wrong branch), the affected
 component's release run fails loudly rather than silently releasing unbounded history. Fix `cutoverCommit` and
 re-run.
+
+## Troubleshooting: a merged release pull request never gets tagged
+
+`release` finds a component's still-untagged releases by looking for merged pull requests that still carry its
+`autorelease: pending (...)` label — that label is only removed once the release has actually been created, so
+it's authoritative rather than a heuristic: every pending pull request is always found, however much other
+release history surrounds it.
+
+If `release` is interrupted after creating the GitHub Release/tag but before it finishes commenting on the pull
+request and swapping its labels (a network blip, a GitHub API hiccup, etc.), the next run resumes automatically:
+it looks up the existing release by tag instead of creating a duplicate one, and finishes the labeling. The
+`autorelease: tagged (...)` label is added before `autorelease: pending (...)` is removed, so a pull request
+interrupted mid-cleanup is left with both labels rather than neither — still safely resumable, and never mistaken
+for a fresh, unreleased pull request.
+

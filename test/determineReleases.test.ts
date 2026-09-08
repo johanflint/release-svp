@@ -5,20 +5,13 @@ import { Github } from "../src/github";
 import { logger } from "../src/logger";
 import { createPullRequestBody } from "../src/pullRequestBody";
 import { Release } from "../src/release";
-import { Tag } from "../src/tag";
 
 describe("determineReleases", () => {
     const github = new Github({ repo: "repo", owner: "owner" }, "token", logger);
     const options: ReleaseOptions = {
-        releaseBranchName: "release-svp--branches-main",
         labelPending: "autorelease: pending",
         componentName: "",
     };
-
-    vi.spyOn(github, "tagIterator").mockImplementation(async function* (): AsyncGenerator<Tag> {
-        yield { sha: "", name: "ignored-tag", committedDate: "" }
-        yield { sha: "release", name: "0.1.0", committedDate: "" }
-    });
 
     describe("with no merged pull requests", () => {
         vi.spyOn(github, "pullRequestIterator").mockImplementation(async function* () {});
@@ -30,53 +23,45 @@ describe("determineReleases", () => {
     });
 
     describe("with merged pull requests", () => {
-        it("returns a release if the head branch name prefix matches", async () => {
+        it("returns a release for a pull request still labeled pending", async () => {
             vi.spyOn(github, "pullRequestIterator").mockImplementation(async function* () {
-                yield {
-                    ...defaultPullRequest,
-                    headBranchName: "release-svp--branches-main",
-                    labels: [],
-                }
+                yield { ...defaultPullRequest, labels: ["autorelease: pending"] }
             });
 
             const result = await determineReleases(github, "main", options);
             expect(result).toEqual([expectedRelease]);
         });
 
-        it("returns a release if the label matches", async () => {
+        it("ignores pull requests that do not carry the pending label", async () => {
+            // A merged pull request that no longer carries the pending label has already been released — see
+            // Manifest.release(), which only removes it once the release has actually been created. Once removed,
+            // it's authoritative: no need to fall back to inspecting the branch name or scanning tag history.
             vi.spyOn(github, "pullRequestIterator").mockImplementation(async function* () {
-                yield {
-                    ...defaultPullRequest,
-                    headBranchName: "fix/a-bug",
-                    labels: ["autorelease: pending"],
-                }
-            });
-
-            const result = await determineReleases(github, "main", options);
-            expect(result).toEqual([expectedRelease]);
-        });
-
-        it("ignores pull requests that do not match the branch name prefix or labels", async () => {
-            vi.spyOn(github, "pullRequestIterator").mockImplementation(async function* () {
-                yield {
-                    ...defaultPullRequest,
-                    headBranchName: "fix/a-bug",
-                    labels: [],
-                }
+                yield { ...defaultPullRequest, headBranchName: "release-svp--branches-main", labels: [] }
             });
 
             const result = await determineReleases(github, "main", options);
             expect(result.length).toBe(0);
         });
 
-        it("ignores a pull request whose branch/label matches but has no release notes section for this component", async () => {
+        it("ignores pull requests carrying a different component's pending label", async () => {
+            vi.spyOn(github, "pullRequestIterator").mockImplementation(async function* () {
+                yield { ...defaultPullRequest, labels: ["autorelease: pending (some-other-component)"] }
+            });
+
+            const result = await determineReleases(github, "main", options);
+            expect(result.length).toBe(0);
+        });
+
+        it("ignores a pull request whose label matches but has no release notes section for this component", async () => {
             // Regression test: once a pull request can bundle several components' notes together (combined
-            // release pull requests), matching this component's own branch/label isn't enough proof that this
-            // component is (still) a member of it -- e.g. it may have already been released and dropped from
-            // the body, or belong to a different release group that happens to reuse the branch/label.
+            // release pull requests), matching this component's own label isn't enough proof that this component
+            // is (still) a member of it -- e.g. it may have already been released and dropped from the body, or
+            // belong to a different release group that happens to reuse the label.
             vi.spyOn(github, "pullRequestIterator").mockImplementation(async function* () {
                 yield {
                     ...defaultPullRequest,
+                    labels: ["autorelease: pending"],
                     body: createPullRequestBody([{ componentName: "some-other-component", notes: "## v0.1.0\n\n- Release notes" }]),
                 }
             });
@@ -89,6 +74,7 @@ describe("determineReleases", () => {
             vi.spyOn(github, "pullRequestIterator").mockImplementation(async function* () {
                 yield {
                     ...defaultPullRequest,
+                    labels: ["autorelease: pending"],
                     body: createPullRequestBody([
                         { componentName: "", notes: "## v0.1.0\n\n- Release notes" },
                         { componentName: "some-other-component", notes: "## v2.0.0\n\n- Other notes" },
@@ -100,53 +86,20 @@ describe("determineReleases", () => {
             expect(result).toEqual([expectedRelease]);
         });
 
-        it("ignores pull requests whose branch name only has the release branch name as a prefix", async () => {
-            // Regression test: a component's release branch (e.g. "release-svp--branches-main--api") must not
-            // match another component's exact branch name check just because it starts with the same string.
-            vi.spyOn(github, "pullRequestIterator").mockImplementation(async function* () {
-                yield {
-                    ...defaultPullRequest,
-                    headBranchName: "release-svp--branches-main--api",
-                    labels: [],
-                }
-            });
-
-            const result = await determineReleases(github, "main", options);
-            expect(result.length).toBe(0);
-        });
-
         it("prefixes the release tag with the given component prefix", async () => {
             vi.spyOn(github, "pullRequestIterator").mockImplementation(async function* () {
-                yield {
-                    ...defaultPullRequest,
-                    headBranchName: "release-svp--branches-main--api",
-                    labels: [],
-                }
+                yield { ...defaultPullRequest, labels: ["autorelease: pending (api)"] }
             });
 
-            const result = await determineReleases(github, "main", { ...options, releaseBranchName: "release-svp--branches-main--api", tagPrefix: "api-" });
+            const result = await determineReleases(github, "main", { ...options, labelPending: "autorelease: pending (api)", tagPrefix: "api-" });
             expect(result).toEqual([{ ...expectedRelease, tag: "api-v0.1.0" }]);
-        });
-
-        it("ignores pull requests that have been released", async () => {
-            vi.spyOn(github, "pullRequestIterator").mockImplementation(async function* () {
-                yield {
-                    ...defaultPullRequest,
-                    sha: "release",
-                }
-            });
-            vi.spyOn(logger, "debug");
-
-            const result = await determineReleases(github, "main", options);
-
-            expect(logger.debug).toHaveBeenCalledWith("Skipping already released pull request #1");
-            expect(result.length).toBe(0);
         });
 
         it("ignores pull requests with invalid release notes", async () => {
             vi.spyOn(github, "pullRequestIterator").mockImplementation(async function* () {
                 yield {
                     ...defaultPullRequest,
+                    labels: ["autorelease: pending"],
                     body: "some body without version number",
                 }
             });
@@ -159,44 +112,25 @@ describe("determineReleases", () => {
         });
     });
 
-    describe("scanning for this component's own tags in a monorepo's repo-wide tag history", () => {
-        // Regression tests for the "100-tag cap" gap: in a monorepo, tags from every component interleave
-        // (newest-first) in the repo-wide tag feed, so a fixed *total* tag count previously risked missing this
-        // component's own recent tags entirely if other components released more often — see determineReleases.ts.
-
-        it("keeps scanning past 100 repo-wide tags to find this component's own matching tag", async () => {
-            vi.spyOn(github, "tagIterator").mockImplementation(async function* (): AsyncGenerator<Tag> {
-                // 150 unrelated tags (e.g. another component's releases) before this component's own tag appears.
-                for (let i = 0; i < 150; i++) {
-                    yield { sha: `other-${i}`, name: `other-v${i}.0.0`, committedDate: "" };
-                }
-                yield { sha: "released-a", name: "a-v1.0.0", committedDate: "" };
-            });
+    describe("finding a still-pending pull request that a scan-depth heuristic would previously have missed", () => {
+        // Regression test for a real bug: determineReleases() used to infer "already released" from a bounded
+        // window of this component's own tags plus a cutoff that gave up scanning after enough confirmed-
+        // released pull requests in a row, assuming everything further back was released too. That's a heuristic
+        // pretending to be a state check, and could silently skip a genuinely unreleased pull request depending
+        // on scan order. Filtering purely by the pending label has no such cutoff: it scans every merged pull
+        // request for this branch, so a still-pending one can never be missed regardless of how many other,
+        // already-released pull requests surround it.
+        it("finds a still-pending pull request however many already-released pull requests it's scanned past first", async () => {
             vi.spyOn(github, "pullRequestIterator").mockImplementation(async function* () {
-                yield { ...defaultPullRequest, sha: "released-a" };
-            });
-
-            const result = await determineReleases(github, "main", { ...options, tagPrefix: "a-" });
-
-            // Recognized as already released only if the scan reached the 151st tag, beyond the old 100 cap.
-            expect(result.length).toBe(0);
-        });
-
-        it("stops scanning and warns after the safety limit when no matching tag is found", async () => {
-            vi.spyOn(github, "tagIterator").mockImplementation(async function* (): AsyncGenerator<Tag> {
-                for (let i = 0; i < 1500; i++) {
-                    yield { sha: `other-${i}`, name: `other-v${i}.0.0`, committedDate: "" };
+                for (let i = 0; i < 25; i++) {
+                    yield { ...defaultPullRequest, number: i + 1, labels: [] };
                 }
+                yield { ...defaultPullRequest, number: 26, labels: ["autorelease: pending"] };
             });
-            vi.spyOn(github, "pullRequestIterator").mockImplementation(async function* () {
-                yield { ...defaultPullRequest, sha: "unreleased" };
-            });
-            vi.spyOn(logger, "warn");
 
-            const result = await determineReleases(github, "main", { ...options, tagPrefix: "a-" });
+            const result = await determineReleases(github, "main", options);
 
-            expect(logger.warn).toHaveBeenCalledWith("⚠️ Scanned 1000 tags without finding 10 releases for tag prefix 'a-', stopping");
-            expect(result).toEqual([{ ...expectedRelease, sha: "unreleased", tag: "a-v0.1.0" }]);
+            expect(result).toEqual([{ ...expectedRelease, pullRequestNumber: 26 }]);
         });
     });
 });

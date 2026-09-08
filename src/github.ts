@@ -463,6 +463,21 @@ export class Github {
         }
     }
 
+    // Used to resume bookkeeping (comment + label swap) for a pull request whose release was already created by
+    // an earlier, partially-failed run — see Manifest.release()'s handling of DuplicateReleaseError.
+    async retrieveReleaseByTag(tag: string) {
+        const response = await this.octokit.rest.repos.getReleaseByTag({
+            owner: this.repository.owner,
+            repo: this.repository.repo,
+            tag,
+        });
+
+        return {
+            id: response.data.id,
+            url: response.data.html_url,
+        }
+    }
+
     async commentOnIssue(comment: string, pullRequestNumber: number) {
         const response = await this.octokit.rest.issues.createComment({
             owner: this.repository.owner,

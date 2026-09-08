@@ -261,6 +261,19 @@ function buildRoutes(state: RepoState): RouteMatch[] {
                 return { id: release.id, html_url: `https://example.invalid/${state.owner}/${state.repo}/releases/tag/${release.tagName}` };
             },
         },
+        // GET /repos/{owner}/{repo}/releases/tags/{tag} — used by Github.getReleaseByTag to resume bookkeeping
+        // for a release that a previous run already created (see manifest.ts's DuplicateReleaseError handling).
+        {
+            method: "GET",
+            pattern: new RegExp(`^${escapedRepoPath}/releases/tags/(.+)$`),
+            handle: params => {
+                const release = state.releases.find(release => release.tagName === params[0]);
+                if (!release) {
+                    throw new FakeNotFoundError(`No release found for tag ${params[0]}`);
+                }
+                return { id: release.id, html_url: `https://example.invalid/${state.owner}/${state.repo}/releases/tag/${release.tagName}` };
+            },
+        },
         // POST /repos/{owner}/{repo}/issues/{number}/comments
         {
             method: "POST",
