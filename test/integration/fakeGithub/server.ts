@@ -261,6 +261,19 @@ function buildRoutes(state: RepoState): RouteMatch[] {
                 return { id: release.id, html_url: `https://example.invalid/${state.owner}/${state.repo}/releases/tag/${release.tagName}` };
             },
         },
+        // GET /repos/{owner}/{repo}/releases/tags/{tag} — used by Github.getReleaseByTag to resume bookkeeping
+        // for a release that a previous run already created (see manifest.ts's DuplicateReleaseError handling).
+        {
+            method: "GET",
+            pattern: new RegExp(`^${escapedRepoPath}/releases/tags/(.+)$`),
+            handle: params => {
+                const release = state.releases.find(release => release.tagName === params[0]);
+                if (!release) {
+                    throw new FakeNotFoundError(`No release found for tag ${params[0]}`);
+                }
+                return { id: release.id, html_url: `https://example.invalid/${state.owner}/${state.repo}/releases/tag/${release.tagName}` };
+            },
+        },
         // POST /repos/{owner}/{repo}/issues/{number}/comments
         {
             method: "POST",
@@ -316,7 +329,7 @@ function toPullRequestResponse(pr: ReturnType<RepoState["getPullRequestOrThrow"]
 
 // GraphQL queries are matched by name (the fixed set release-svp ships in src/graphql/*.graphql — see the
 // `query <name>(...)` declaration in each file) rather than by parsing/executing a real GraphQL schema, since
-// release-svp only ever sends these four specific documents.
+// release-svp only ever sends these six specific documents.
 function handleGraphQl(state: RepoState, query: string, variables: Record<string, any>): unknown {
     const name = /query\s+(\w+)/.exec(query)?.[1];
     switch (name) {
@@ -327,22 +340,43 @@ function handleGraphQl(state: RepoState, query: string, variables: Record<string
         case "mergedPullRequests":
             return handleMergedPullRequests(state, variables);
         case "pullRequestFiles":
-            return handlePullRequestFiles(state, variables);
+            return handlePullRequestFiles();
+        case "pullRequestLabels":
+            return handlePullRequestLabels();
+        case "associatedPullRequests":
+            return handleAssociatedPullRequests();
         default:
             throw new Error(`Fake GitHub server received an unrecognized GraphQL query (no case for name '${name}') — add it to handleGraphQl in fakeGithub/server.ts.`);
     }
 }
 
-function handleLatestTags(state: RepoState) {
+// Slices a full, already-ordered list into one GraphQL connection page, honoring the `count`/`cursor`
+// variables release-svp's iterators send (see `paginate` in src/github.ts) — the fake's cursor is simply the
+// number of items already returned, opaque to callers exactly like a real Relay cursor. Shared by every
+// paginated query below so a genuine multi-page fixture (11+ tags/pull requests) exercises the same follow-up-
+// request pagination path a real run against GitHub would.
+function paginateList<T>(items: T[], variables: Record<string, any>): { page: T[]; pageInfo: { hasNextPage: boolean; endCursor?: string } } {
+    const count: number = variables.count ?? items.length;
+    const start = variables.cursor ? Number(variables.cursor) : 0;
+    const page = items.slice(start, start + count);
+    const end = start + page.length;
+    return {
+        page,
+        pageInfo: { hasNextPage: end < items.length, endCursor: end < items.length ? String(end) : undefined },
+    };
+}
+
+function handleLatestTags(state: RepoState, variables: Record<string, any>) {
     const tags = [...state.tags.values()].sort((a, b) => b.committedDate.localeCompare(a.committedDate));
+    const { page, pageInfo } = paginateList(tags, variables);
     return {
         repository: {
             refs: {
-                nodes: tags.map(tag => ({
+                nodes: page.map(tag => ({
                     name: tag.name,
                     target: { oid: tag.commitSha, committedDate: tag.committedDate, messageHeadline: state.commits.get(tag.commitSha)?.message ?? "" },
                 })),
-                pageInfo: { hasNextPage: false, endCursor: undefined },
+                pageInfo,
             },
         },
     };
@@ -371,20 +405,21 @@ function walkHistory(state: RepoState, targetBranch: string): ReturnType<RepoSta
 function handlePullRequestsSince(state: RepoState, variables: Record<string, any>) {
     const history = walkHistory(state, variables.targetBranch);
     const associatedPrByMergeSha = new Map(state.pullRequests.filter(pr => pr.mergeCommitSha).map(pr => [pr.mergeCommitSha, pr]));
+    const { page, pageInfo } = paginateList(history, variables);
     return {
         repository: {
             ref: {
                 target: {
                     history: {
-                        nodes: history.map(commit => {
+                        nodes: page.map(commit => {
                             const pr = associatedPrByMergeSha.get(commit.sha);
                             return {
                                 sha: commit.sha,
                                 message: commit.message,
-                                associatedPullRequests: { nodes: pr ? [toGraphQlPullRequest(pr)] : [] },
+                                associatedPullRequests: { nodes: pr ? [toGraphQlPullRequest(pr)] : [], pageInfo: { hasNextPage: false, endCursor: undefined } },
                             };
                         }),
-                        pageInfo: { hasNextPage: false, endCursor: undefined },
+                        pageInfo,
                     },
                 },
             },
@@ -409,11 +444,12 @@ function handleMergedPullRequests(state: RepoState, variables: Record<string, an
         }
         return false;
     });
+    const { page, pageInfo } = paginateList(matches, variables);
     return {
         repository: {
             pullRequests: {
-                nodes: matches.map(toGraphQlPullRequest),
-                pageInfo: { hasNextPage: false, endCursor: undefined },
+                nodes: page.map(toGraphQlPullRequest),
+                pageInfo,
             },
         },
     };
@@ -427,6 +463,19 @@ function handlePullRequestFiles() {
     throw new Error("Fake GitHub server does not implement pullRequestFiles pagination yet (no fixture needs >100 changed files per PR).");
 }
 
+function handlePullRequestLabels() {
+    // Mirrors handlePullRequestFiles above, but for labels (see fetchRemainingLabels in src/github.ts): none of
+    // the fake's fixtures produce PRs with >100 labels, so this path is intentionally unimplemented for now.
+    throw new Error("Fake GitHub server does not implement pullRequestLabels pagination yet (no fixture needs >100 labels per PR).");
+}
+
+function handleAssociatedPullRequests() {
+    // Mirrors handlePullRequestFiles above, but for a commit's associated pull requests (see
+    // fetchRemainingAssociatedPullRequests in src/github.ts): none of the fake's fixtures produce a commit with
+    // more than 100 associated pull requests, so this path is intentionally unimplemented for now.
+    throw new Error("Fake GitHub server does not implement associatedPullRequests pagination yet (no fixture needs >100 associated pull requests per commit).");
+}
+
 function toGraphQlPullRequest(pr: ReturnType<RepoState["getPullRequestOrThrow"]>) {
     return {
         number: pr.number,
@@ -436,7 +485,7 @@ function toGraphQlPullRequest(pr: ReturnType<RepoState["getPullRequestOrThrow"]>
         baseRefName: pr.baseBranch,
         headRefName: pr.headBranch,
         mergeCommit: pr.mergeCommitSha ? { oid: pr.mergeCommitSha } : null,
-        labels: { nodes: pr.labels.map(name => ({ name })) },
+        labels: { nodes: pr.labels.map(name => ({ name })), pageInfo: { hasNextPage: false, endCursor: undefined } },
         files: { nodes: pr.changedFilePaths.map(path => ({ path })), pageInfo: { hasNextPage: false, endCursor: undefined } },
     };
 }

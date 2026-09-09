@@ -392,20 +392,24 @@ describe("Manifest", () => {
             expect(githubMock.addPullRequestLabels).toHaveBeenCalledWith(["autorelease: tagged"], 4);
         });
 
-        it("logs a warning for duplicate release tags", async () => {
+        it("resumes bookkeeping for a release that already exists, without re-commenting", async () => {
             const githubMock = createGithubMock();
             vi.spyOn(logger, "warn");
 
             vi.mocked(determineReleases).mockResolvedValue([release]);
             vi.mocked(githubMock.createRelease).mockRejectedValue(new DuplicateReleaseError(new RequestError("", 400, {request: { method: "GET", url: "", headers: {}}}), "v1.2.4"));
+            vi.mocked(githubMock.retrieveReleaseByTag).mockResolvedValue({ id: 1, url: "url" });
 
             const manifest = createManifest();
 
             await manifest.release();
 
             expect(githubMock.createRelease).toHaveBeenCalledWith(release);
-            expect(logger.warn).toHaveBeenCalledWith(`Duplicate release tag for v1.2.4`);
-            expect(githubMock.commentOnIssue).not.toHaveBeenCalledWith(":bowtie: Created release [v1.2.4](url) :tulip:", 4);
+            expect(githubMock.retrieveReleaseByTag).toHaveBeenCalledWith("v1.2.4");
+            expect(logger.warn).toHaveBeenCalledWith(`Release v1.2.4 already exists, resuming pull request #4 bookkeeping...`);
+            expect(githubMock.commentOnIssue).not.toHaveBeenCalled();
+            expect(githubMock.addPullRequestLabels).toHaveBeenCalledWith(["autorelease: tagged"], 4);
+            expect(githubMock.removePullRequestLabels).toHaveBeenCalledWith(["autorelease: pending"], 4);
         });
 
         it("throws unexpected exceptions", async () => {
@@ -477,7 +481,6 @@ describe("Manifest", () => {
             await manifest.release();
 
             expect(determineReleases).toHaveBeenCalledWith(expect.anything(), "main", {
-                releaseBranchName: "release-svp--branches-main--api",
                 labelPending: "autorelease: pending (api)",
                 tagPrefix: "api-",
                 componentName: "api",
@@ -495,6 +498,7 @@ function createGithubMock(overrides?: Partial<Github>) {
         updatePullRequest: vi.fn(),
         pullRequestIterator: vi.fn(),
         createRelease: vi.fn(),
+        retrieveReleaseByTag: vi.fn(),
         commentOnIssue: vi.fn(),
         removePullRequestLabels: vi.fn(),
         addPullRequestLabels: vi.fn(),

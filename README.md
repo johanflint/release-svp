@@ -204,9 +204,13 @@ component inherits the old history and from which exact tag — release-svp will
 ### Example
 
 Say a repository releases as a single project (tags `v1.0.0`, `v1.4.0`, ...). Commit `A` makes an ordinary
-change and should be released normally, under the old scheme, first. Commit `B` then adds
-`release-svp-config.json`, splitting the repository into components `a` (continuing the old repository's
-identity) and `b` (brand new, no prior history):
+change and should be released normally, under the old scheme, first. Commit `R` then reorganizes the repository
+into the new component layout (e.g. moving files into `a/` and `b/`). Only *after* `R` exists — and its sha is
+therefore known — does a later commit `C` add `release-svp-config.json`, referencing `R`'s sha and splitting the
+repository into components `a` (continuing the old repository's identity) and `b` (brand new, no prior history).
+`R` and `C` must be two separate commits: a commit's sha can't be known before it's created, so a config
+couldn't reference its own not-yet-computed sha if it were added in the very same commit that reorganizes the
+repository.
 
 ```jsonc
 {
@@ -215,10 +219,11 @@ identity) and `b` (brand new, no prior history):
     { "component": "b", "path": "b", "releaseType": "rust" }
   ],
   "migration": {
-    // The commit that introduced this config (commit B). Commits at or before this one predate any component
-    // concept and are never considered "unreleased" for any component — this also excludes the reorganization
-    // commit itself from every component's changelog.
-    "cutoverCommit": "<full 40-character sha of commit B>",
+    // The commit that reorganized the repository into the new component layout (commit R) — an earlier, separate
+    // commit from the one that adds this config (commit C; see above for why they can't be the same commit).
+    // Commits at or before this one predate any component concept and are never considered "unreleased" for any
+    // component — this also excludes the reorganization commit itself from every component's changelog.
+    "cutoverCommit": "<full 40-character sha of commit R>",
 
     // Which component (if any) continues the old repository's release history. Omit entirely if none should
     // (e.g. the repository is being split into components that are all conceptually new).
@@ -252,7 +257,7 @@ With this config:
 
 - It does not move, split, or rewrite `CHANGELOG.md`/version files for you. If `a` is meant to continue the old
   repository's identity but its version files now live at `a/Cargo.toml` instead of the repository root, you
-  still need to make that reorganization yourself (e.g. as part of commit `B`) — release-svp only reads/writes
+  still need to make that reorganization yourself (e.g. as part of commit `R`) — release-svp only reads/writes
   wherever a component's strategy is configured to look (`<path>/Cargo.toml`, etc).
 - It does not automatically close or migrate any release PR that was already open under the old, unscoped
   branch/label scheme before you added the config. Merge or close it before switching, or it will become
@@ -263,3 +268,18 @@ With this config:
 Note: if `cutoverCommit` isn't reachable from `targetBranch` (typo, or the wrong branch), the affected
 component's release run fails loudly rather than silently releasing unbounded history. Fix `cutoverCommit` and
 re-run.
+
+## Troubleshooting: a merged release pull request never gets tagged
+
+`release` finds a component's still-untagged releases by looking for merged pull requests that still carry its
+`autorelease: pending (...)` label — that label is only removed once the release has actually been created, so
+it's authoritative rather than a heuristic: every pending pull request is always found, however much other
+release history surrounds it.
+
+If `release` is interrupted after creating the GitHub Release/tag but before it finishes commenting on the pull
+request and swapping its labels (a network blip, a GitHub API hiccup, etc.), the next run resumes automatically:
+it looks up the existing release by tag instead of creating a duplicate one, and finishes the labeling. The
+`autorelease: tagged (...)` label is added before `autorelease: pending (...)` is removed, so a pull request
+interrupted mid-cleanup is left with both labels rather than neither — still safely resumable, and never mistaken
+for a fresh, unreleased pull request.
+

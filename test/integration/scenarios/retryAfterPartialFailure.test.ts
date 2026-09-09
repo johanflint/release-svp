@@ -71,4 +71,45 @@ describe("scenario: retry after a partial release failure", () => {
         expect(state.releases.map(release => release.tagName).sort()).toEqual(["alpha-v0.1.0", "beta-v0.1.0"].sort());
         expect(state.pullRequests.find(pr => pr.title.startsWith("Release beta"))!.labels).toEqual([taggedLabel("beta")]);
     });
+
+    it("resumes labeling (without a duplicate release) when bookkeeping fails right after the release/tag is created", async () => {
+        harness = await createHarness();
+        const { state } = harness;
+
+        const alpha = rustComponent("alpha");
+        state.seedCommit({
+            message: "chore: initial commit",
+            files: { ...componentFiles(alpha), "release-svp-config.json": configFileContent({ components: [alpha] }) },
+        });
+        mergeLabeledPullRequest(state, { branch: "alpha-feature", files: { "alpha/src/lib.rs": "// alpha v1\n" }, label: "feat" });
+
+        expect(await (await harness.createRunner()).prepare()).toBe(true);
+        state.pullRequests.filter(pr => pr.state === "open").forEach(pr => state.mergePullRequest(pr.number));
+        // Only one component is configured, so its release pull request title has no component-name prefix
+        // (see combinedPullRequest.ts, `pullRequestTitle`) — just "Release v<version>".
+        const alphaPrNumber = state.pullRequests.find(pr => pr.title.startsWith("Release v"))!.number;
+
+        // The release/tag itself is created successfully; only the labeling step that follows fails (a genuine
+        // GitHub error, not the "already exists" shape release-svp specifically retries around).
+        harness.failNextRequest(
+            (method, pathname) => method === "POST" && pathname === `/repos/owner/repo/issues/${alphaPrNumber}/labels`,
+            422, // not 5xx: octokit's retry plugin would silently retry a 5xx and mask the fault entirely
+            "Simulated transient GitHub failure",
+        );
+
+        expect(await (await harness.createRunner()).release()).toBe(false);
+
+        // The release/tag exists, and the pull request was commented on — only the label swap didn't happen, so
+        // it's still labeled pending, not (yet) tagged.
+        expect(state.releases.map(release => release.tagName)).toEqual(["alpha-v0.1.0"]);
+        const alphaPr = state.pullRequests.find(pr => pr.number === alphaPrNumber)!;
+        expect(alphaPr.labels).not.toContain(taggedLabel("alpha"));
+
+        // Retrying finds the same pull request again (still labeled pending), recognizes the release/tag already
+        // exists instead of trying to create a duplicate one, and finishes the labeling.
+        expect(await (await harness.createRunner()).release()).toBe(true);
+
+        expect(state.releases.map(release => release.tagName)).toEqual(["alpha-v0.1.0"]); // still just the one
+        expect(state.pullRequests.find(pr => pr.number === alphaPrNumber)!.labels).toEqual([taggedLabel("alpha")]);
+    });
 });

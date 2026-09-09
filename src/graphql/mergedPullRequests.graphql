@@ -1,28 +1,35 @@
+# Used (among other things) by determineReleases.ts to find this component's still-pending release pull
+# requests. Ordering doesn't affect correctness there — every merged pull request for the branch is scanned, no
+# early exit — but UPDATED_AT keeps recently-active pull requests near the front, which is a reasonable default
+# for anything else iterating this same query (e.g. inspecting recent activity in log output).
+#
+# Deliberately does not fetch `files`: pullRequestIterator is built on this document, and its callers
+# (determineReleases.ts, Manifest.findExistingPullRequest, ManifestRunner's open-pull-request conflict check)
+# only need labels/body/merge-SHA/number, never changed-file paths. Fetching and paginating changed files for
+# every merged pull request scanned (release() has no early exit) risked blocking the whole scan whenever one
+# old, unrelated pull request had enough changed files to exceed the pagination safety cap. See
+# pullRequestsSince.graphql (mergeCommitIterator) for the document that does fetch files, for component path
+# attribution.
 query mergedPullRequests($owner: String!, $repo: String!, $count: Int!, $targetBranch: String!, $states: [PullRequestState!], $cursor: String) {
     repository(owner: $owner, name: $repo) {
-        pullRequests(first: $count, after: $cursor, baseRefName: $targetBranch, states: $states, orderBy: {field: CREATED_AT, direction: DESC}) {
+        pullRequests(first: $count, after: $cursor, baseRefName: $targetBranch, states: $states, orderBy: {field: UPDATED_AT, direction: DESC}) {
             nodes {
                 number
                 title
                 baseRefName
                 headRefName
-                labels(first: 10) {
+                labels(first: 100) {
                     nodes {
                         name
-                    }
-                }
-                body
-                mergeCommit {
-                    oid
-                }
-                files(first: 100) {
-                    nodes {
-                        path
                     }
                     pageInfo {
                         hasNextPage
                         endCursor
                     }
+                }
+                body
+                mergeCommit {
+                    oid
                 }
             }
             pageInfo {

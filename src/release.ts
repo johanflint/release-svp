@@ -1,7 +1,7 @@
 import { PullRequest } from "./commit";
 import { logger } from "./logger";
 import { extractComponentSections, parsePullRequestBody } from "./pullRequestBody";
-import { Version } from "./version";
+import { Version, VERSION_PATTERN_SOURCE } from "./version";
 
 export interface Release {
     readonly sha: string;
@@ -50,7 +50,11 @@ export function pullRequestCoversComponent(body: string, componentName: string):
     return sections.some(section => section.componentName === componentName);
 }
 
-const VERSION_REGEX = /^#{2,} v?\[?(?<version>\d+\.\d+\.\d+[^\]]*)]?/;
+// Matches a component's changelog heading, e.g. "## v1.2.3", "## [1.2.3]" or "## 1.2.3 (2025-11-26)".
+// The version itself is captured using the exact same SemVer grammar as `Version.parse` so trailing
+// content after the version (a date, a closing "]", etc.) is never accidentally swept into the
+// captured version string.
+const VERSION_REGEX = new RegExp(`^#{2,} v?\\[?(?<version>${VERSION_PATTERN_SOURCE})]?`);
 function extractReleaseInfo(body: string, pullRequestNumber: number, componentName: string) {
     const pullRequestBody = parsePullRequestBody(body);
     if (!pullRequestBody) {

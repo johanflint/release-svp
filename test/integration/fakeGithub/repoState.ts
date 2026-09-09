@@ -130,6 +130,19 @@ export class RepoState {
         this.branches.set(branch, commitSha);
     }
 
+    // Reads a single file's content at a branch's current head — used by scenario tests to assert on actual
+    // release-file content (Cargo.toml/Cargo.lock/CHANGELOG.md), not just labels/tags/releases. Returns
+    // `undefined` if the branch or path doesn't exist, mirroring "not found" rather than throwing, since a test
+    // asserting a file was NOT touched is just as legitimate as one asserting it was.
+    getFileContent(branch: string, path: string): string | undefined {
+        const headSha = this.branches.get(branch);
+        if (!headSha) {
+            return undefined;
+        }
+        const entry = this.getRecursiveTree(this.getCommitOrThrow(headSha).treeSha).find(e => e.path === path);
+        return entry ? this.blobs.get(entry.sha) : undefined;
+    }
+
     // ---- Git data API (mirrors github.com/repos/{owner}/{repo}/git/*) ----
 
     getRef(ref: string): string {

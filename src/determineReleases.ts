@@ -1,21 +1,8 @@
 import { Github } from "./github";
 import { logger } from "./logger";
-import { parseVersionTag } from "./parseVersionTag";
 import { buildReleaseForComponent, pullRequestCoversComponent, Release } from "./release";
-import { Tag } from "./tag";
-
-// How deep into the release history to scan before assuming everything older is already released
-// Only counts tags for the component to be released
-const RELEASE_HISTORY_DEPTH: number = 10;
-
-// Safety ceiling on how many *repo-wide* tags to scan while looking for this component's own tags, so a
-// component with no (or very few) prior releases still terminates in a monorepo with a large, unrelated tag
-// history — see retrieveVersionTags below.
-const TAG_SCAN_SAFETY_LIMIT: number = 1000;
 
 export interface ReleaseOptions {
-    // Exact release-PR branch name (not a prefix) to match against — see componentNaming.releaseBranchName.
-    releaseBranchName: string;
     labelPending: string;
     // Prefix applied to release tags, scoping them to a single component — see componentNaming.tagPrefix.
     tagPrefix?: string;
@@ -24,37 +11,31 @@ export interface ReleaseOptions {
     componentName: string;
 }
 
+// Finds this component's merged release pull requests that still need a GitHub Release/tag created for them.
+//
+// A merged pull request still carrying `options.labelPending` is, by definition, not yet released: Manifest's
+// release() only removes that label once the release has actually been created (see manifest.ts). This is
+// deliberately simple: the label is this tool's own bookkeeping, so it's an authoritative answer rather than a
+// heuristic. An earlier version of this function instead tried to infer "already released" from a bounded window
+// of this component's own tags plus a depth-based scan cutoff — that was a heuristic pretending to be a state
+// check: it assumed pull request scan order tracked release recency closely enough that giving up after N
+// confirmed-already-released pull requests in a row was safe, which doesn't hold in every case and could silently
+// skip a genuinely unreleased pull request. Label-only filtering has no such cutoff, so it can't silently miss one.
 export async function determineReleases(github: Github, targetBranch: string, options: ReleaseOptions): Promise<Release[]> {
     logger.info("Finding release candidates...");
-    const versionTags = await retrieveVersionTags(github, options.tagPrefix ?? "");
-    const releasedShas = new Set(versionTags.map(tag => tag.sha));
-
     const mergedPullRequests = github.pullRequestIterator(targetBranch, "MERGED");
     const releases: Release[] = [];
-    let confirmedReleaseCount = 0;
     for await (const pullRequest of mergedPullRequests) {
-        const isReleasePullRequest = pullRequest.headBranchName === options.releaseBranchName || pullRequest.labels.includes(options.labelPending);
-        if (!isReleasePullRequest) {
+        if (!pullRequest.labels.includes(options.labelPending)) {
             continue;
         }
 
         // Once a pull request can bundle several components' notes together (see README.md, "Combined release
-        // pull requests"), a branch/label match alone isn't enough — it only proves the pull request BELONGS to
-        // this component's release group, not that this specific component is (still) a member of it. See
+        // pull requests"), a label match alone isn't enough — it only proves the pull request BELONGS to this
+        // component's release group, not that this specific component is (still) a member of it. See
         // `pullRequestCoversComponent`.
         if (!pullRequestCoversComponent(pullRequest.body, options.componentName)) {
-            logger.trace(`Pull request #${pullRequest.number} matched by branch/label but has no release notes section for component '${options.componentName || "<root>"}', skipping`);
-            continue;
-        }
-
-        if (releasedShas.has(pullRequest.sha || "")) {
-            logger.debug(`Skipping already released pull request #${pullRequest.number}`);
-            confirmedReleaseCount++;
-            if (confirmedReleaseCount === RELEASE_HISTORY_DEPTH) {
-                logger.info(`Found ${RELEASE_HISTORY_DEPTH} previous releases after examining pull request #${pullRequest.number}, assuming older pull requests have been released`);
-                break;
-            }
-
+            logger.trace(`Pull request #${pullRequest.number} matched by label but has no release notes section for component '${options.componentName || "<root>"}', skipping`);
             continue;
         }
 
@@ -68,31 +49,4 @@ export async function determineReleases(github: Github, targetBranch: string, op
     }
 
     return releases;
-}
-
-async function retrieveVersionTags(github: Github, tagPrefix: string) {
-    // Repo-wide tags interleave across every configured component (newest-first), so a fixed *total* tag count
-    // (e.g. "the newest 100 tags") can miss this component's own recent tags entirely if other components have
-    // released more often — that previously caused determineReleases() to mistake an already-released pull
-    // request for an unreleased one. Instead, keep scanning until we've found enough of *our own* matching tags
-    // (the same depth determineReleases() itself treats as "enough to conclude everything older is released"),
-    // bounded by TAG_SCAN_SAFETY_LIMIT so a component with little or no tag history still terminates.
-    const tags: Tag[] = [];
-    let scanned = 0;
-    for await (const tag of github.tagIterator()) {
-        scanned++;
-        if (parseVersionTag(tag.name, tagPrefix)) {
-            tags.push(tag);
-            if (tags.length === RELEASE_HISTORY_DEPTH) {
-                break;
-            }
-        }
-
-        if (scanned === TAG_SCAN_SAFETY_LIMIT) {
-            logger.warn(`⚠️ Scanned ${TAG_SCAN_SAFETY_LIMIT} tags without finding ${RELEASE_HISTORY_DEPTH} releases for tag prefix '${tagPrefix}', stopping`);
-            break;
-        }
-    }
-
-    return tags;
 }

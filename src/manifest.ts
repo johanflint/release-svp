@@ -126,7 +126,6 @@ export class Manifest {
 
     async release() {
         const releases = await determineReleases(this.github, this.targetBranch, {
-            releaseBranchName: releaseBranchName(this.targetBranch, this.componentName),
             labelPending: pendingLabel(this.componentName),
             tagPrefix: tagPrefix(this.componentName),
             componentName: this.componentName,
@@ -139,25 +138,41 @@ export class Manifest {
 
         for (const release of releases) {
             logger.info(`Creating release ${release.tag} for pull request #${release.pullRequestNumber}...`);
+
+            // Resume, rather than skip, a pull request whose release was already created by an earlier run that
+            // then failed before it could finish commenting/relabeling — determineReleases() has no way to tell
+            // "genuinely new" and "release exists, bookkeeping didn't finish" apart (both are still labeled
+            // pending), so that distinction is made here instead by trying to create the release and falling
+            // back to looking the existing one up by tag on a DuplicateReleaseError.
+            let result;
             try {
-                const result = await this.github.createRelease(release);
+                result = await this.github.createRelease(release);
                 logger.info(`Created release ${result.id} at ${result.url}`);
 
                 const comment = `:bowtie: Created release [${release.tag}](${result.url}) :tulip:`;
                 const url = await this.github.commentOnIssue(comment, release.pullRequestNumber);
                 logger.info(`Commented on pull request #${release.pullRequestNumber} at ${url}`);
-
-                logger.info(`Updating labels, removing '${pendingLabel(this.componentName)}'...`);
-                await this.github.removePullRequestLabels([pendingLabel(this.componentName)], release.pullRequestNumber);
-                logger.info(`Updating labels, adding '${taggedLabel(this.componentName)}'...`);
-                await this.github.addPullRequestLabels([taggedLabel(this.componentName)], release.pullRequestNumber);
             } catch (e) {
-                if (e instanceof DuplicateReleaseError) {
-                    logger.warn(`Duplicate release tag for ${e.tagName}`);
-                } else {
+                if (!(e instanceof DuplicateReleaseError)) {
                     throw e;
                 }
+
+                logger.warn(`Release ${release.tag} already exists, resuming pull request #${release.pullRequestNumber} bookkeeping...`);
+                result = await this.github.retrieveReleaseByTag(release.tag);
+                // Deliberately not re-commenting here: since the release already existed, an earlier run most
+                // likely posted the comment too, and comment failures are cosmetic — worth risking a rare
+                // missing comment over guaranteeing a duplicate one on every retry.
             }
+
+            // Add the tagged label before removing pending, not after: if this component's release run gets
+            // interrupted between the two, a pull request left with BOTH labels is still unambiguously
+            // recognizable as "released, cleanup unfinished" and safely retried (removeLabel on an
+            // already-removed label is a no-op below) — left with NEITHER, it would look unreleased again and
+            // determineReleases() would try to create a duplicate release for it on every subsequent run.
+            logger.info(`Updating labels, adding '${taggedLabel(this.componentName)}'...`);
+            await this.github.addPullRequestLabels([taggedLabel(this.componentName)], release.pullRequestNumber);
+            logger.info(`Updating labels, removing '${pendingLabel(this.componentName)}'...`);
+            await this.github.removePullRequestLabels([pendingLabel(this.componentName)], release.pullRequestNumber);
         }
 
         console.info(`✅️ Created ${releases.length} release(s) 🌷️`);

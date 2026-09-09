@@ -7,7 +7,7 @@ query pullRequestsSince($owner: String!, $repo: String!, $count: Int!, $targetBr
                         nodes {
                             sha: oid
                             message
-                            associatedPullRequests(first: 10) {
+                            associatedPullRequests(first: 100) {
                                 nodes {
                                     number
                                     title
@@ -18,9 +18,13 @@ query pullRequestsSince($owner: String!, $repo: String!, $count: Int!, $targetBr
                                     mergeCommit {
                                         oid
                                     }
-                                    labels(first: 10) {
+                                    labels(first: 100) {
                                         nodes {
                                             name
+                                        }
+                                        pageInfo {
+                                            hasNextPage
+                                            endCursor
                                         }
                                     }
                                     files(first: 100) {
@@ -32,6 +36,10 @@ query pullRequestsSince($owner: String!, $repo: String!, $count: Int!, $targetBr
                                             endCursor
                                         }
                                     }
+                                }
+                                pageInfo {
+                                    hasNextPage
+                                    endCursor
                                 }
                             }
                         }

@@ -119,6 +119,18 @@ describe("FakeGithubServer", () => {
         ).rejects.toMatchObject({ status: 422, response: { data: { errors: [{ code: "already_exists" }] } } });
     });
 
+    it("looks up an existing release by tag, and 404s for a tag with no release", async () => {
+        const rootSha = state.seedCommit({ message: "root", files: { "a.txt": "hello" } });
+        await octokit.rest.repos.createRelease({ owner: "owner", repo: "repo", tag_name: "v1.0.0", name: "v1.0.0", target_commitish: rootSha });
+
+        const fetched = await octokit.rest.repos.getReleaseByTag({ owner: "owner", repo: "repo", tag: "v1.0.0" });
+        expect(fetched.data.id).toBeDefined();
+
+        await expect(
+            octokit.rest.repos.getReleaseByTag({ owner: "owner", repo: "repo", tag: "v2.0.0" }),
+        ).rejects.toMatchObject({ status: 404 });
+    });
+
     it("answers the latestTags GraphQL query with seeded tags, newest first", async () => {
         const sha1 = state.seedCommit({ message: "v1", files: { "a.txt": "1" } });
         const sha2 = state.seedCommit({ message: "v2", files: { "a.txt": "2" } });

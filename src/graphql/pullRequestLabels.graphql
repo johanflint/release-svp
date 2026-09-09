@@ -1,0 +1,15 @@
+query pullRequestLabels($owner: String!, $repo: String!, $number: Int!, $cursor: String) {
+    repository(owner: $owner, name: $repo) {
+        pullRequest(number: $number) {
+            labels(first: 100, after: $cursor) {
+                nodes {
+                    name
+                }
+                pageInfo {
+                    hasNextPage
+                    endCursor
+                }
+            }
+        }
+    }
+}
