@@ -1,18 +1,19 @@
-// A component whose baseline tag already carries SemVer pre-release metadata (e.g. "v0.1.0-beta") must have
-// that metadata preserved through the version bump (see src/versioningStrategy.ts, each VersionUpdater keeps
-// `preRelease`/`build`) AND must be published to GitHub as a pre-release rather than a stable release (see
-// src/release.ts `buildReleaseForComponent` and src/github.ts `createRelease`).
+// A component's pre-release status is now driven purely by its config (`prereleaseType`, see
+// manifestConfig.ts) — see src/manifest.ts (`applyPrereleaseType`) and README.md ("Pre-releases"). A baseline
+// tag that happens to carry SemVer pre-release metadata (e.g. "v0.1.0-beta", from a manual tag predating that
+// config field) no longer keeps a component in pre-release mode by itself: without `prereleaseType` configured,
+// the very next release graduates straight to stable, published as a regular (non-pre-)release.
 import { afterEach, describe, expect, it } from "vitest";
 import { cargoToml, createHarness, IntegrationHarness, mergeLabeledPullRequest } from "../harness";
 
-describe("scenario: pre-release version baseline", () => {
+describe("scenario: pre-release version baseline with no prereleaseType configured", () => {
     let harness: IntegrationHarness;
 
     afterEach(async () => {
         await harness?.close();
     });
 
-    it("preserves pre-release metadata through the bump and publishes the release as a GitHub pre-release", async () => {
+    it("graduates to a stable release on the next bump, discarding the old pre-release metadata", async () => {
         harness = await createHarness();
         const { state } = harness;
 
@@ -28,13 +29,16 @@ describe("scenario: pre-release version baseline", () => {
 
         expect(await (await harness.createRunner("rust")).prepare()).toBe(true);
         const pullRequest = state.pullRequests.find(pr => pr.state === "open");
-        expect(pullRequest?.title).toContain("0.1.1-beta"); // "fix" bumps patch only, pre-release metadata carries over
+        // Graduated: same numeric target as the old "0.1.0-beta" tag, just without the "-beta" suffix — a
+        // trivial fix alone would only justify "0.0.1" from a true stable baseline, but the version must never
+        // move backwards relative to what "0.1.0-beta" already committed to (see src/manifest.ts, `higherNumericTarget`).
+        expect(pullRequest?.title).toContain("0.1.0");
 
         state.mergePullRequest(pullRequest!.number);
         expect(await (await harness.createRunner("rust")).release()).toBe(true);
 
         expect(state.releases).toHaveLength(1);
-        expect(state.releases[0].tagName).toBe("v0.1.1-beta");
-        expect(state.releases[0].prerelease).toBe(true);
+        expect(state.releases[0].tagName).toBe("v0.1.0");
+        expect(state.releases[0].prerelease).toBe(false);
     });
 });

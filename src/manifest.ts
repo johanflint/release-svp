@@ -12,7 +12,7 @@ import { UpdateOptions } from "./strategy";
 import { buildStrategy } from "./strategyFactory";
 import { Update } from "./update";
 import { SemanticVersioningStrategy } from "./versioningStrategies/semantic";
-import { Version } from "./version";
+import { incrementPrereleaseIdentifier, Version } from "./version";
 
 // The pure result of "would this component release, and what would it contain" — computed without any GitHub
 // side effects (no pull request is created/updated/read). Kept separate from opening/updating the pull request
@@ -32,6 +32,9 @@ export class Manifest {
     // for this component (see componentPathFilter.ts); defaulting to "" / [""] preserves single-project
     // behaviour (every commit is attributed to the root component). `migration` is only present while a
     // repository is migrating from single-project to multi-component mode — see manifestConfig.ts and README.md.
+    // `prereleaseType` is only present when this component is configured for pre-releases (see
+    // manifestConfig.ts, `ComponentConfig.prereleaseType`, and README.md "Pre-releases"); removing it from
+    // config graduates the component back to stable on its next release.
     private constructor(
         private readonly github: Github,
         private readonly repository: Repository,
@@ -40,6 +43,7 @@ export class Manifest {
         private readonly componentPath: string = "",
         private readonly allComponentPaths: readonly string[] = [""],
         private readonly migration?: MigrationOptions,
+        private readonly prereleaseType?: string,
     ) {}
 
     // Computes what this component's next release would look like (version, changelog, file updates) without
@@ -63,7 +67,15 @@ export class Manifest {
         logger.info(`Previous release is 'v${releaseContext.previousRelease}', ${releaseContext.unreleasedCommits.length} unreleased commit(s)`);
 
         const versioningStrategy = new SemanticVersioningStrategy();
-        const releaseVersion = versioningStrategy.releaseType(releaseContext.unreleasedCommits).bump(releaseContext.previousRelease);
+        // Always compute the numeric bump from the last *stable* release, not merely the last tag of any kind:
+        // when this component is mid pre-release train, `previousRelease` may itself already reflect a bump
+        // (e.g. a breaking change) that no longer shows up in `unreleasedCommits` (they only cover commits made
+        // *after* that tag) — taking whichever of "what the new commits alone call for" and "what
+        // `previousRelease` already committed to" is numerically higher recovers that already-committed-to
+        // bump so it's never silently lost, and a version can never move backwards.
+        const newTarget = versioningStrategy.releaseType(releaseContext.unreleasedCommits).bump(releaseContext.previousStableRelease);
+        const bumpTarget = higherNumericTarget(newTarget, releaseContext.previousRelease);
+        const releaseVersion = applyPrereleaseType(bumpTarget, releaseContext.previousRelease, this.prereleaseType);
         logger.info(`Next release is v${releaseVersion}`);
 
         const changelog = buildChangelog(releaseContext.unreleasedCommits, new PullRequestChangelogNoteBuilder(), releaseVersion)
@@ -182,7 +194,8 @@ export class Manifest {
     // target branch. Used by ManifestRunner so that resolving the repository/branch/wasm init happens once per
     // run, regardless of how many components it processes. `componentName`/`componentPath` default to "" and
     // `allComponentPaths` to [""] (root component, single-project behaviour). `migration` is only passed while
-    // a repository is migrating from single-project to multi-component mode.
+    // a repository is migrating from single-project to multi-component mode. `prereleaseType` is only passed
+    // for a component configured for pre-releases (see manifestConfig.ts, `ComponentConfig.prereleaseType`).
     static forComponent(
         github: Github,
         repository: Repository,
@@ -191,7 +204,53 @@ export class Manifest {
         componentPath: string = "",
         allComponentPaths: readonly string[] = [""],
         migration?: MigrationOptions,
+        prereleaseType?: string,
     ): Manifest {
-        return new Manifest(github, repository, targetBranch, componentName, componentPath, allComponentPaths, migration);
+        return new Manifest(github, repository, targetBranch, componentName, componentPath, allComponentPaths, migration, prereleaseType);
     }
+}
+
+// Picks whichever of `a` and `b`'s numeric (major.minor.patch) parts is higher, discarding any pre-release
+// identifier/build metadata either one carries (that's decided separately, see `applyPrereleaseType` below) —
+// see `computeCandidate` above for why this must never move backwards relative to `previousRelease`.
+function higherNumericTarget(a: Version, b: Version): Version {
+    const numericallyHigherOrEqual = a.major !== b.major ? a.major > b.major
+        : a.minor !== b.minor ? a.minor > b.minor
+        : a.patch >= b.patch;
+    const winner = numericallyHigherOrEqual ? a : b;
+    return new Version(winner.major, winner.minor, winner.patch);
+}
+
+// Decides the final release version's pre-release identifier (if any) from `bumpTarget` (the plain
+// major.minor.patch this release would be at, with no identifier — see `higherNumericTarget`/`bumpTarget`
+// above), the previous release's version (to detect whether this continues the same train) and this
+// component's configured `prereleaseType` (see manifestConfig.ts, README.md "Pre-releases"):
+//  - No `prereleaseType` configured: always stable. This is also how a component *graduates* — removing
+//    `prereleaseType` from config strips whatever pre-release identifier a previous release carried, even if
+//    the numeric target stays exactly the same (e.g. "1.0.0-beta" -> "1.0.0", not "1.0.1").
+//  - `prereleaseType` configured, and `previousRelease` is already a pre-release of this exact same
+//    major.minor.patch target using this same identifier (or a numbered continuation of it): continue that
+//    train by incrementing its trailing number (e.g. "beta" -> "beta.1", "beta.1" -> "beta.2").
+//  - Otherwise (first release of a new train, e.g. after a bump moved the target, or after switching
+//    `prereleaseType` to a different word): start fresh with the configured identifier verbatim.
+function applyPrereleaseType(bumpTarget: Version, previousRelease: Version, prereleaseType: string | undefined): Version {
+    if (prereleaseType === undefined) {
+        return bumpTarget;
+    }
+
+    const sameTarget = previousRelease.major === bumpTarget.major
+        && previousRelease.minor === bumpTarget.minor
+        && previousRelease.patch === bumpTarget.patch;
+    const continuingTrain = sameTarget && previousRelease.preRelease !== undefined && isContinuationOf(previousRelease.preRelease, prereleaseType);
+
+    const preRelease = continuingTrain ? incrementPrereleaseIdentifier(previousRelease.preRelease!) : prereleaseType;
+    return new Version(bumpTarget.major, bumpTarget.minor, bumpTarget.patch, preRelease, bumpTarget.build);
+}
+
+// True when `identifier` is either exactly `prereleaseType` or `prereleaseType` followed by a "." and a
+// numbered continuation (e.g. "beta.3" continues "beta") — the shape `incrementPrereleaseIdentifier` always
+// produces. Guards against blindly incrementing an unrelated identifier left over from before `prereleaseType`
+// was changed to a different word (e.g. "beta.3" -> "rc" must start fresh at "rc", not "rc.4").
+function isContinuationOf(identifier: string, prereleaseType: string): boolean {
+    return identifier === prereleaseType || identifier.startsWith(`${prereleaseType}.`);
 }
