@@ -115,6 +115,82 @@ describe("determineReleaseContext", () => {
         });
     });
 
+    describe("with a stable previous release (no pre-release identifier)", () => {
+        it("sets previousStableRelease to the same version as previousRelease, without scanning any further back", async () => {
+            vi.spyOn(github, "tagIterator").mockImplementation(async function* (): AsyncGenerator<Tag> {
+                yield { sha: previousReleaseCommit.sha, name: "0.1.0", committedDate: "" };
+                yield { sha: initialCommit.sha, name: "0.0.1", committedDate: "" };
+            });
+            vi.spyOn(github, "mergeCommitIterator").mockImplementation(async function* () {
+                yield featureCommit;
+                yield previousReleaseCommit;
+                yield initialCommit;
+            });
+
+            const result = await determineReleaseContext(github, "main");
+            expect(result.previousRelease).toEqual(Version.parse("0.1.0"));
+            expect(result.previousStableRelease).toEqual(Version.parse("0.1.0"));
+        });
+    });
+
+    describe("with a pre-release train (see manifestConfig.ts, 'prereleaseType')", () => {
+        const betaCommit = createMergeCommit(7, "Release 1.1.0-beta.1", []);
+        const midTrainCommit = createCommit("A commit between the beta and the last stable release");
+        const stableCommit = createMergeCommit(8, "Release 1.0.0", []);
+
+        it("keeps scanning past a pre-release tag to find the newest stable tag, without affecting unreleasedCommits", async () => {
+            vi.spyOn(github, "tagIterator").mockImplementation(async function* (): AsyncGenerator<Tag> {
+                yield { sha: betaCommit.sha, name: "1.1.0-beta.1", committedDate: "" };
+                yield { sha: stableCommit.sha, name: "1.0.0", committedDate: "" };
+            });
+            vi.spyOn(github, "mergeCommitIterator").mockImplementation(async function* () {
+                yield featureCommit;
+                yield betaCommit;
+                yield midTrainCommit;
+                yield stableCommit;
+            });
+
+            const result = await determineReleaseContext(github, "main");
+            expect(result.previousRelease).toEqual(Version.parse("1.1.0-beta.1"));
+            expect(result.previousStableRelease).toEqual(Version.parse("1.0.0"));
+            // unreleasedCommits is still anchored to the newest tag (the pre-release one), same as before this
+            // was added — the extra scanning only affects previousStableRelease.
+            expect(result.unreleasedCommits).toEqual([featureCommit]);
+        });
+
+        it("falls back to Version.unreleased when no stable tag has ever existed", async () => {
+            vi.spyOn(github, "tagIterator").mockImplementation(async function* (): AsyncGenerator<Tag> {
+                yield { sha: betaCommit.sha, name: "1.1.0-beta.1", committedDate: "" };
+            });
+            vi.spyOn(github, "mergeCommitIterator").mockImplementation(async function* () {
+                yield featureCommit;
+                yield betaCommit;
+            });
+
+            const result = await determineReleaseContext(github, "main");
+            expect(result.previousRelease).toEqual(Version.parse("1.1.0-beta.1"));
+            expect(result.previousStableRelease).toEqual(Version.unreleased);
+        });
+
+        it("ignores a stable tag belonging to a different component when scanning for the stable baseline", async () => {
+            vi.spyOn(github, "tagIterator").mockImplementation(async function* (): AsyncGenerator<Tag> {
+                yield { sha: betaCommit.sha, name: "api-v1.1.0-beta.1", committedDate: "" };
+                yield { sha: featureCommit.sha, name: "web-v2.0.0", committedDate: "" };
+                yield { sha: stableCommit.sha, name: "api-v1.0.0", committedDate: "" };
+            });
+            vi.spyOn(github, "mergeCommitIterator").mockImplementation(async function* () {
+                yield featureCommit;
+                yield betaCommit;
+                yield midTrainCommit;
+                yield stableCommit;
+            });
+
+            const result = await determineReleaseContext(github, "main", "api-");
+            expect(result.previousRelease).toEqual(Version.parse("1.1.0-beta.1"));
+            expect(result.previousStableRelease).toEqual(Version.parse("1.0.0"));
+        });
+    });
+
     describe("with a previous release tag not on the default branch", () => {
         it("returns an unreleased version and all commits", async () => {
             vi.spyOn(github, "tagIterator").mockImplementation(async function* (): AsyncGenerator<Tag> {

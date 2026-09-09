@@ -88,6 +88,7 @@ describe("Manifest", () => {
                 vi.spyOn(logger, "info");
                 vi.mocked(determineReleaseContext).mockResolvedValue({
                     previousRelease: Version.parse("1.2.3"),
+                    previousStableRelease: Version.parse("1.2.3"),
                     unreleasedCommits: [],
                 });
 
@@ -114,6 +115,7 @@ describe("Manifest", () => {
 
                 vi.mocked(determineReleaseContext).mockResolvedValue({
                     previousRelease: Version.parse("1.2.3"),
+                    previousStableRelease: Version.parse("1.2.3"),
                     unreleasedCommits: [{
                         sha: "sha0",
                         message: "New commit",
@@ -159,6 +161,7 @@ describe("Manifest", () => {
 
                 vi.mocked(determineReleaseContext).mockResolvedValue({
                     previousRelease: Version.parse("1.2.3"),
+                    previousStableRelease: Version.parse("1.2.3"),
                     unreleasedCommits: [{
                         sha: "sha0",
                         message: "New commit",
@@ -216,6 +219,7 @@ describe("Manifest", () => {
                 vi.spyOn(logger, "info");
                 vi.mocked(determineReleaseContext).mockResolvedValue({
                     previousRelease: Version.parse("1.2.3"),
+                    previousStableRelease: Version.parse("1.2.3"),
                     unreleasedCommits: [{
                         sha: "sha0",
                         message: "New commit",
@@ -263,6 +267,7 @@ describe("Manifest", () => {
                 vi.spyOn(logger, "info");
                 vi.mocked(determineReleaseContext).mockResolvedValue({
                     previousRelease: Version.parse("1.2.3"),
+                    previousStableRelease: Version.parse("1.2.3"),
                     unreleasedCommits: [{
                         sha: "sha0",
                         message: "New commit",
@@ -304,6 +309,7 @@ describe("Manifest", () => {
                 vi.spyOn(logger, "info");
                 vi.mocked(determineReleaseContext).mockResolvedValue({
                     previousRelease: Version.parse("1.2.3"),
+                    previousStableRelease: Version.parse("1.2.3"),
                     unreleasedCommits: [{
                         sha: "sha0",
                         message: "New commit",
@@ -438,6 +444,7 @@ describe("Manifest", () => {
 
             vi.mocked(determineReleaseContext).mockResolvedValue({
                 previousRelease: Version.parse("1.2.3"),
+                previousStableRelease: Version.parse("1.2.3"),
                 unreleasedCommits: [{
                     sha: "sha0",
                     message: "New commit",
