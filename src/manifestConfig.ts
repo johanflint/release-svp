@@ -1,5 +1,5 @@
 import { strategyTypes } from "./strategyFactory";
-import { Version } from "./version";
+import { isValidPrereleaseIdentifier, Version } from "./version";
 
 // Component identifiers are used in tag names, branch names and labels, so keep them URL/git-ref safe.
 const COMPONENT_NAME_PATTERN = /^[a-zA-Z0-9](?:[a-zA-Z0-9_.-]*[a-zA-Z0-9])?$/;
@@ -46,6 +46,12 @@ export interface ComponentConfig {
     // an ungrouped component (its own pull request). Components without `releaseGroup` are never bundled with
     // components that do declare one.
     readonly releaseGroup?: string;
+    // When set, every release computed for this component carries this SemVer pre-release identifier (e.g.
+    // "beta", "rc.1") — see README.md ("Pre-releases"). Removing this field (or never setting it) always
+    // produces a stable release, regardless of what pre-release identifier a previous release/tag carried; this
+    // is the only way to "graduate" a component that was previously pre-release back to stable. Validated
+    // against the SemVer 2.0 pre-release-identifier grammar (see version.ts, `isValidPrereleaseIdentifier`).
+    readonly prereleaseType?: string;
 }
 
 export interface MigrationConfig {
@@ -290,6 +296,16 @@ function parseComponent(entry: unknown, index: number, validTypes: readonly stri
         }
     }
 
+    let prereleaseType: string | undefined;
+    if ("prereleaseType" in raw) {
+        if (typeof raw.prereleaseType !== "string" || !isValidPrereleaseIdentifier(raw.prereleaseType)) {
+            issues.push(`components[${index}]: 'prereleaseType' must be a valid SemVer pre-release identifier (e.g. 'beta', 'rc.1') when present (got '${raw.prereleaseType}')`);
+            valid = false;
+        } else {
+            prereleaseType = raw.prereleaseType;
+        }
+    }
+
     if (!valid) {
         return undefined;
     }
@@ -304,6 +320,7 @@ function parseComponent(entry: unknown, index: number, validTypes: readonly stri
         component: raw.component as string,
         releaseType: raw.releaseType as string,
         releaseGroup,
+        prereleaseType,
     };
 }
 
