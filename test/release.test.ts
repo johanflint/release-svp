@@ -36,6 +36,19 @@ describe("buildReleaseForComponent", () => {
         expect(release?.sha).toBe("sha");
         expect(release?.tag).toBe("v1.2.3");
         expect(release?.notes).toBe(changelog.trim());
+        expect(release?.prerelease).toBe(false);
+    });
+
+    it("marks the release as a pre-release when the version carries pre-release metadata", () => {
+        const prereleasePullRequest = {
+            ...pullRequest,
+            body: createPullRequestBody([{ componentName: "", notes: "## v1.2.3-beta\n\n- Release notes" }]),
+        };
+
+        const release = buildReleaseForComponent(prereleasePullRequest, "");
+
+        expect(release?.tag).toBe("v1.2.3-beta");
+        expect(release?.prerelease).toBe(true);
     });
 
     it("returns a release if all release info is present if the pull request body contains no footer delimiter", () => {

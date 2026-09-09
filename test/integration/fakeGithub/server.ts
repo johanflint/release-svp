@@ -257,6 +257,7 @@ function buildRoutes(state: RepoState): RouteMatch[] {
                     name: body.name ?? body.tag_name,
                     body: body.body ?? "",
                     targetCommitish: body.target_commitish ?? state.defaultBranch,
+                    prerelease: body.prerelease ?? false,
                 });
                 return { id: release.id, html_url: `https://example.invalid/${state.owner}/${state.repo}/releases/tag/${release.tagName}` };
             },

@@ -334,6 +334,7 @@ describe("Manifest", () => {
             tag: "v1.2.4",
             notes: "notes",
             pullRequestNumber: 4,
+            prerelease: false,
         }
 
         it("does nothing if there is nothing to release", async () => {
@@ -472,6 +473,7 @@ describe("Manifest", () => {
                 tag: "api-v1.2.4",
                 notes: "notes",
                 pullRequestNumber: 4,
+                prerelease: false,
             };
 
             vi.mocked(determineReleases).mockResolvedValue([namespacedRelease]);
