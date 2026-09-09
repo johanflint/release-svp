@@ -68,7 +68,7 @@ export class ManifestRunner {
             const label = componentLabel(component);
             logger.info(`--- Preparing release for component '${label}' ---`);
             try {
-                const manifest = Manifest.forComponent(this.github, this.repository, this.targetBranch, component.component, component.path, allComponentPaths, migrationOptionsFor(component, this.migration));
+                const manifest = Manifest.forComponent(this.github, this.repository, this.targetBranch, component.component, component.path, allComponentPaths, migrationOptionsFor(component, this.migration), component.prereleaseType);
                 manifestsByComponent.set(component.component, manifest);
                 const candidate = await manifest.computeCandidate(component.releaseType);
                 if (candidate) {
@@ -206,7 +206,7 @@ export class ManifestRunner {
             const label = componentLabel(component);
             logger.info(`--- Creating release(s) for component '${label}' ---`);
             try {
-                await Manifest.forComponent(this.github, this.repository, this.targetBranch, component.component, component.path, allComponentPaths, migrationOptionsFor(component, this.migration))
+                await Manifest.forComponent(this.github, this.repository, this.targetBranch, component.component, component.path, allComponentPaths, migrationOptionsFor(component, this.migration), component.prereleaseType)
                     .release();
             } catch (e) {
                 logger.error(`Failed to create release(s) for component '${label}'`, e);

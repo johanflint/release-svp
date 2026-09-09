@@ -137,7 +137,29 @@ describe("ManifestRunner", () => {
 
                 await result!.prepare();
 
-                expect(Manifest.forComponent).toHaveBeenCalledWith(expect.anything(), expect.anything(), "trunk", "project-b", "b", ["b"], undefined);
+                expect(Manifest.forComponent).toHaveBeenCalledWith(expect.anything(), expect.anything(), "trunk", "project-b", "b", ["b"], undefined, undefined);
+            });
+
+            it("passes a component's configured prereleaseType through to Manifest.forComponent", async () => {
+                createGithubMock({
+                    retrieveDefaultBranch: vi.fn().mockResolvedValue("main"),
+                    retrieveFileContents: vi.fn().mockResolvedValue({
+                        parsedContent: JSON.stringify({
+                            components: [{ path: "b", component: "project-b", releaseType: "rust", prereleaseType: "beta" }],
+                        }),
+                    }),
+                });
+
+                const result = await ManifestRunner.create("owner/repo", token, undefined, logger);
+                expect(result).not.toBeNull();
+
+                vi.mocked(Manifest.forComponent).mockReturnValue({
+                    prepare: vi.fn().mockResolvedValue(undefined),
+                } as unknown as Manifest);
+
+                await result!.prepare();
+
+                expect(Manifest.forComponent).toHaveBeenCalledWith(expect.anything(), expect.anything(), "main", "project-b", "b", ["b"], undefined, "beta");
             });
 
             it("re-reads the config from the target branch when it differs from the default branch", async () => {
@@ -165,7 +187,7 @@ describe("ManifestRunner", () => {
 
                 expect(retrieveFileContents).toHaveBeenNthCalledWith(1, "release-svp-config.json", "main");
                 expect(retrieveFileContents).toHaveBeenNthCalledWith(2, "release-svp-config.json", "trunk");
-                expect(Manifest.forComponent).toHaveBeenCalledWith(expect.anything(), expect.anything(), "trunk", "project-b", "b", ["b"], undefined);
+                expect(Manifest.forComponent).toHaveBeenCalledWith(expect.anything(), expect.anything(), "trunk", "project-b", "b", ["b"], undefined, undefined);
             });
 
             it("falls back to the default branch's config when the target branch has none", async () => {
@@ -188,7 +210,7 @@ describe("ManifestRunner", () => {
                 await result!.prepare();
 
                 expect(logger.warn).toHaveBeenCalledWith("'release-svp-config.json' not found on target branch 'trunk', falling back to the copy on default branch 'main'");
-                expect(Manifest.forComponent).toHaveBeenCalledWith(expect.anything(), expect.anything(), "trunk", "project-a", "a", ["a"], undefined);
+                expect(Manifest.forComponent).toHaveBeenCalledWith(expect.anything(), expect.anything(), "trunk", "project-a", "a", ["a"], undefined, undefined);
             });
 
             it("warns and ignores a nested targetBranch declared by the target branch's own config", async () => {
@@ -218,7 +240,7 @@ describe("ManifestRunner", () => {
                 expect(logger.warn).toHaveBeenCalledWith(
                     "'release-svp-config.json' on target branch 'trunk' declares a different 'targetBranch' ('another-branch'), ignoring it to avoid a redirect loop",
                 );
-                expect(Manifest.forComponent).toHaveBeenCalledWith(expect.anything(), expect.anything(), "trunk", "project-b", "b", ["b"], undefined);
+                expect(Manifest.forComponent).toHaveBeenCalledWith(expect.anything(), expect.anything(), "trunk", "project-b", "b", ["b"], undefined, undefined);
             });
 
             it("computes migration options per component from the config's 'migration' block", async () => {
@@ -253,11 +275,13 @@ describe("ManifestRunner", () => {
                 expect(Manifest.forComponent).toHaveBeenCalledWith(
                     expect.anything(), expect.anything(), "main", "project-a", "a", ["a", "b"],
                     { cutoverCommit: "abcdef0123456789abcdef0123456789abcdef01", legacyAnchorTagName: "v1.4.0" },
+                    undefined,
                 );
                 // "project-b" has no legacy history: cutoverCommit + its declared bootstrapVersion.
                 expect(Manifest.forComponent).toHaveBeenCalledWith(
                     expect.anything(), expect.anything(), "main", "project-b", "b", ["a", "b"],
                     { cutoverCommit: "abcdef0123456789abcdef0123456789abcdef01", bootstrapVersion: Version.parse("0.1.0") },
+                    undefined,
                 );
             });
         });
