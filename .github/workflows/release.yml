@@ -1,0 +1,50 @@
+name: release
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+  pull-requests: write
+
+# Serializes runs so two merges landing close together can't race to force-update the same release pull
+# request branch (a later-finishing-but-stale run could otherwise silently drop a commit from the release).
+# Never cancels an in-progress run — letting one finish before the next starts is what avoids the race, and
+# the queued run still re-reads live GitHub state, so it won't miss whatever the cancelled run would have seen.
+concurrency:
+  group: release-svp-${{ github.repository }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install packages
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      # Bootstrap-only: release-svp isn't published to npm yet, so it can't be run via
+      # `npx release-svp@<version>` (see README.md's documented workflow) — this repo runs its own freshly
+      # built `dist/index.mjs` instead. Once v0.1.0 is published, switch both steps below to
+      # `npx --yes release-svp@0.1.0 ...` and delete the checkout/install/build steps above, matching the
+      # README's documented pattern.
+
+      # Tags + creates a GitHub Release if the push just merged a release pull request.
+      - name: Release
+        run: node dist/index.mjs release --repo-url ${{ github.repository }} --token ${{ secrets.GITHUB_TOKEN }}
+
+      # Opens/updates the pull request for the *next* release, reflecting anything merged since.
+      - name: Prepare
+        run: node dist/index.mjs prepare --repo-url ${{ github.repository }} --token ${{ secrets.GITHUB_TOKEN }} --release-type node
