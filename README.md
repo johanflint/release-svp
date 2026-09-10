@@ -44,7 +44,7 @@ jobs:
       - run: npx --yes release-svp@0.1.0 release --repo-url ${{ github.repository }} --token ${{ secrets.GITHUB_TOKEN }}
 
       # Opens/updates the pull request for the *next* release, reflecting anything merged since.
-      - run: npx --yes release-svp@0.1.0 prepare --repo-url ${{ github.repository }} --token ${{ secrets.GITHUB_TOKEN }} --release-type rust
+      - run: npx --yes release-svp@0.1.0 prepare --repo-url ${{ github.repository }} --token ${{ secrets.GITHUB_TOKEN }} --release-type node
 ```
 
 `release-svp` is installed on the fly via `npx` — no need to check out the repository or install its own
@@ -59,9 +59,9 @@ release behaviour underneath you; bump it deliberately when you want a newer ver
 ## Single-project mode (no config file)
 
 If the repository has no `release-svp-config.json`, release-svp treats the whole repository as a single,
-unnamed ("root") component. Pass `--release-type` on the command line to select the strategy (currently only
-`rust` exists). Tags, branches and labels are unscoped (e.g. tag `v1.2.3`, branch `release-svp--main`, label
-`autorelease: pending`).
+unnamed ("root") component. Pass `--release-type` on the command line to select the strategy — `rust`
+(`Cargo.toml`/`Cargo.lock`) or `node` (`package.json`/`package-lock.json`) are currently supported. Tags,
+branches and labels are unscoped (e.g. tag `v1.2.3`, branch `release-svp--main`, label `autorelease: pending`).
 
 ## Multi-component mode (`release-svp-config.json`)
 
@@ -87,6 +87,8 @@ To release multiple independently-versioned components from a single repository 
   component if its changed files fall under that directory. If a file is under a more specific nested path
   (e.g. `"a/nested"` when both `"a"` and `"a/nested"` are configured), the more specific ("longest-prefix-wins")
   path claims it.
+- `releaseType` selects the update strategy for that component: `rust` (`Cargo.toml`/`Cargo.lock`) or `node`
+  (`package.json`/`package-lock.json`).
 - `path: ""` designates a root component that owns anything not claimed by a more specific path. If no
   component declares `path: ""`, files that don't fall under any configured path (e.g. a top-level `README.md`)
   are excluded from every component's release detection — release-svp logs a warning when this happens, but
