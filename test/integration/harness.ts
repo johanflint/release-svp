@@ -84,6 +84,21 @@ export function componentFiles(component: ComponentConfig, initialVersion = "0.0
     return { [`${prefix}Cargo.toml`]: cargoToml(component.component || component.path || "root", initialVersion) };
 }
 
+// Minimal `package.json` content — `NodeStrategy` only updates a package.json that already exists
+// (`createIfMissing: false`, see strategies/node.ts), and `PackageJson`'s updater requires an existing string
+// "version" field to edit in place (see updaters/node/packageJson.ts), so every node-strategy fixture needs one.
+export function packageJson(packageName: string, version: string): string {
+    return `{\n  "name": "${packageName}",\n  "version": "${version}"\n}\n`;
+}
+
+// Minimal `lockfileVersion: 3` `package-lock.json` with a single unrelated dependency entry (whose own
+// "version" must NOT change) — `PackageLockJson`'s updater only bumps the root package's two version locations
+// (top-level "version" and `packages[""].version`, see updaters/node/packageLockJson.ts), so this fixture
+// doubles as a regression check that dependency versions are left alone.
+export function packageLockJson(packageName: string, version: string): string {
+    return `{\n  "name": "${packageName}",\n  "version": "${version}",\n  "lockfileVersion": 3,\n  "packages": {\n    "": {\n      "name": "${packageName}",\n      "version": "${version}"\n    },\n    "node_modules/left-pad": {\n      "version": "1.3.0"\n    }\n  }\n}\n`;
+}
+
 // Builds a minimal, valid rust-strategy component config. `path` defaults to `component` (the common case: a
 // component's directory is named after it) — pass `path` explicitly when they should differ.
 export function rustComponent(component: string, overrides?: { path?: string; releaseGroup?: string; prereleaseType?: string }): ComponentConfig {
