@@ -1,0 +1,11 @@
+{
+  "name": "test-package",
+  "version": "1.2.3",
+  "description": "fixture for PackageJson updater tests",
+    "scripts": {
+        "build": "tsc"
+    },
+  "config": {
+    "version": "should-not-change"
+  }
+}

@@ -1,10 +1,12 @@
 import { RustStrategy } from "./strategies/rust";
 import { Strategy, StrategyConfiguration } from "./strategy";
+import { NodeStrategy } from "./strategies/node";
 
 type StrategyBuilder = (options: StrategyConfiguration) => Strategy;
 
 const strategies: Record<string, StrategyBuilder> = {
     "rust": config => new RustStrategy(config),
+    "node": config => new NodeStrategy(config),
 }
 
 export function strategyTypes(): readonly string[] {

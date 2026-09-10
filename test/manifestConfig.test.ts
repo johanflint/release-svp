@@ -69,7 +69,7 @@ describe("parseManifestConfig", () => {
     it("throws when 'releaseType' is not a known strategy", () => {
         expect(() => parseManifestConfig(JSON.stringify({
             components: [{ path: "b", component: "project-b", releaseType: "unknown" }],
-        }))).toThrow(/'releaseType' must be one of \[rust\]/);
+        }))).toThrow(/'releaseType' must be one of \[node, rust\]/);
     });
 
     it("throws when 'component' contains invalid characters", () => {
