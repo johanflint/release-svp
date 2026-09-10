@@ -10,16 +10,6 @@ import { CargoLock } from "../../src/updaters/rust/cargoLock";
 import { CargoToml } from "../../src/updaters/rust/cargoToml";
 import { Version } from "../../src/version";
 
-vi.mock("../../src/strategy", () => {
-    const methods = ["getData", "saveData"];
-    return {
-        MyService: vi.fn().mockImplementation(() => {
-            const mockObj: any = {};
-            methods.forEach(m => mockObj[m] = vi.fn());
-            return mockObj;
-        })
-    };
-});
 vi.mock("../../src/updaters/rust/cargoLock", () => ({
     CargoLock: vi.fn(),
 }));
