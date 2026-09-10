@@ -153,4 +153,5 @@ const expectedRelease: Release = {
         "\n" +
         "- Release notes",
     pullRequestNumber: 1,
+    prerelease: false,
 }

@@ -338,4 +338,64 @@ describe("parseManifestConfig", () => {
             expect(config.components[0].releaseGroup).toBe("product-a");
         });
     });
+
+    describe("prereleaseType", () => {
+        it("is undefined when absent", () => {
+            const config = parseManifestConfig(JSON.stringify({
+                components: [{ path: "a", component: "project-a", releaseType: "rust" }],
+            }));
+            expect(config.components[0].prereleaseType).toBeUndefined();
+        });
+
+        it("parses a bare word identifier", () => {
+            const config = parseManifestConfig(JSON.stringify({
+                components: [{ path: "a", component: "project-a", releaseType: "rust", prereleaseType: "beta" }],
+            }));
+            expect(config.components[0].prereleaseType).toBe("beta");
+        });
+
+        it("parses a dot-separated identifier", () => {
+            const config = parseManifestConfig(JSON.stringify({
+                components: [{ path: "a", component: "project-a", releaseType: "rust", prereleaseType: "rc.1" }],
+            }));
+            expect(config.components[0].prereleaseType).toBe("rc.1");
+        });
+
+        it("allows different components to have different (or no) pre-release identifiers", () => {
+            const config = parseManifestConfig(JSON.stringify({
+                components: [
+                    { path: "a", component: "project-a", releaseType: "rust", prereleaseType: "beta" },
+                    { path: "b", component: "project-b", releaseType: "rust", prereleaseType: "rc" },
+                    { path: "c", component: "project-c", releaseType: "rust" },
+                ],
+            }));
+            expect(config.components[0].prereleaseType).toBe("beta");
+            expect(config.components[1].prereleaseType).toBe("rc");
+            expect(config.components[2].prereleaseType).toBeUndefined();
+        });
+
+        it("throws when present but not a string", () => {
+            expect(() => parseManifestConfig(JSON.stringify({
+                components: [{ path: "a", component: "project-a", releaseType: "rust", prereleaseType: 1 }],
+            }))).toThrow(/'prereleaseType' must be a valid SemVer pre-release identifier/);
+        });
+
+        it("throws when present but empty", () => {
+            expect(() => parseManifestConfig(JSON.stringify({
+                components: [{ path: "a", component: "project-a", releaseType: "rust", prereleaseType: "" }],
+            }))).toThrow(/'prereleaseType' must be a valid SemVer pre-release identifier/);
+        });
+
+        it("throws when it has a leading zero in a numeric identifier", () => {
+            expect(() => parseManifestConfig(JSON.stringify({
+                components: [{ path: "a", component: "project-a", releaseType: "rust", prereleaseType: "01" }],
+            }))).toThrow(/'prereleaseType' must be a valid SemVer pre-release identifier/);
+        });
+
+        it("throws when it contains characters outside the SemVer identifier alphabet", () => {
+            expect(() => parseManifestConfig(JSON.stringify({
+                components: [{ path: "a", component: "project-a", releaseType: "rust", prereleaseType: "beta 1" }],
+            }))).toThrow(/'prereleaseType' must be a valid SemVer pre-release identifier/);
+        });
+    });
 });

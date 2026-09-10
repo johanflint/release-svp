@@ -658,7 +658,7 @@ export class Github {
                 tag_name: release.tag,
                 body: release.notes,
                 draft: false,
-                prerelease: false,
+                prerelease: release.prerelease,
                 target_commitish: release.sha,
             });
 

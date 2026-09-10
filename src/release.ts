@@ -8,6 +8,9 @@ export interface Release {
     readonly tag: string;
     readonly notes: string;
     readonly pullRequestNumber: number;
+    // Whether the parsed version carries SemVer pre-release metadata (e.g. "1.2.3-beta") — such a version
+    // isn't a stable release yet, so it's published to GitHub as a pre-release rather than a regular one.
+    readonly prerelease: boolean;
 }
 
 export function buildReleaseForComponent(mergedPullRequest: PullRequest, componentName: string, tagPrefix: string = ""): Release | undefined {
@@ -26,6 +29,7 @@ export function buildReleaseForComponent(mergedPullRequest: PullRequest, compone
         tag: `${tagPrefix}v${releaseInfo.version}`,
         notes: releaseInfo.notes,
         pullRequestNumber: mergedPullRequest.number,
+        prerelease: releaseInfo.version.preRelease !== undefined,
     };
 }
 

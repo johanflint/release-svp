@@ -15,6 +15,7 @@ Not sure which mode applies to you? Pick one:
 | is a monorepo with unrelated products that must NOT share a pull request  | Multi-component mode + [`releaseGroup`](#grouping-by-releasegroup) |
 | is a monorepo where every component must always get its own pull request  | Multi-component mode + [`separatePullRequests`](#opting-out-separatepullrequests) |
 | already has release history and is only now being split into components  | [Migrating an existing repository](#migrating-an-existing-repository-to-multiple-components) |
+| needs a component to publish beta/rc versions instead of stable releases  | [Pre-releases](#pre-releases) via `prereleaseType` |
 
 release-svp runs as two separate CLI commands, both meant to run in CI on every push to your default branch:
 
@@ -179,6 +180,37 @@ feature existed is safe to do at any time: the combined pull request lives on it
 (`release-svp--branches-<target>--<group>`), which never collides with an individual component's own branch. Any
 already-open per-component pull request is simply left alone — merge or close it as usual — while future runs
 start using combined pull requests going forward.
+
+## Pre-releases
+
+Set `prereleaseType` on a component to have its releases carry a SemVer pre-release identifier (e.g.
+`1.2.0-beta`), published to GitHub as a pre-release rather than a regular release:
+
+```jsonc
+{
+  "components": [
+    { "component": "project-a", "path": "a", "releaseType": "rust", "prereleaseType": "beta" }
+  ]
+}
+```
+
+- The value must be a valid SemVer pre-release identifier — dot-separated alphanumeric segments, no leading
+  zeros on purely-numeric segments (e.g. `beta`, `rc.1`, `alpha-2` are valid; `01` is not).
+- The first release with `prereleaseType` set uses the identifier as-is (e.g. `1.2.0-beta`). Each subsequent
+  release, while still configured with the *same* identifier, continues that train by incrementing its trailing
+  number (`1.2.0-beta` → `1.2.0-beta.1` → `1.2.0-beta.2`, ...) rather than bumping the version further — the
+  version only advances once a new numeric bump is actually warranted by the commits since the last release.
+- Changing `prereleaseType` to a different value (e.g. `"beta"` → `"rc"`) starts a fresh train at that new
+  identifier (`1.2.0-rc`), rather than continuing the old one's numbering.
+- Removing `prereleaseType` from config graduates the component to a stable release on its very next run — at
+  the same major.minor.patch it was already at (e.g. `1.2.0-beta.3` → `1.2.0`), never bumping further just to
+  "leave" pre-release status. This is a one-way, config-driven switch: a stable release is never turned back
+  into a pre-release, and a manually-created tag that happens to carry pre-release metadata (from before this
+  feature existed, or from history predating a config change) does not by itself keep a component in pre-release
+  mode — only the current `prereleaseType` config value decides that.
+- A component's version is never allowed to move backwards, regardless of `prereleaseType` changes: switching
+  pre-release identifiers, or graduating to stable, always compares against every previously released version
+  (both pre-release and stable) and only ever advances.
 
 ## Migrating an existing repository to multiple components
 

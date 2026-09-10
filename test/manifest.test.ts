@@ -1,7 +1,7 @@
 import { RequestError } from "octokit";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { buildChangelog } from "../src/changelogBuilder";
-import { PullRequest } from "../src/commit";
+import { Commit, PullRequest } from "../src/commit";
 import { determineReleaseContext } from "../src/determineReleaseContext";
 import { determineReleases } from "../src/determineReleases";
 import { DuplicateReleaseError, Github } from "../src/github";
@@ -88,6 +88,7 @@ describe("Manifest", () => {
                 vi.spyOn(logger, "info");
                 vi.mocked(determineReleaseContext).mockResolvedValue({
                     previousRelease: Version.parse("1.2.3"),
+                    previousStableRelease: Version.parse("1.2.3"),
                     unreleasedCommits: [],
                 });
 
@@ -114,6 +115,7 @@ describe("Manifest", () => {
 
                 vi.mocked(determineReleaseContext).mockResolvedValue({
                     previousRelease: Version.parse("1.2.3"),
+                    previousStableRelease: Version.parse("1.2.3"),
                     unreleasedCommits: [{
                         sha: "sha0",
                         message: "New commit",
@@ -159,6 +161,7 @@ describe("Manifest", () => {
 
                 vi.mocked(determineReleaseContext).mockResolvedValue({
                     previousRelease: Version.parse("1.2.3"),
+                    previousStableRelease: Version.parse("1.2.3"),
                     unreleasedCommits: [{
                         sha: "sha0",
                         message: "New commit",
@@ -216,6 +219,7 @@ describe("Manifest", () => {
                 vi.spyOn(logger, "info");
                 vi.mocked(determineReleaseContext).mockResolvedValue({
                     previousRelease: Version.parse("1.2.3"),
+                    previousStableRelease: Version.parse("1.2.3"),
                     unreleasedCommits: [{
                         sha: "sha0",
                         message: "New commit",
@@ -263,6 +267,7 @@ describe("Manifest", () => {
                 vi.spyOn(logger, "info");
                 vi.mocked(determineReleaseContext).mockResolvedValue({
                     previousRelease: Version.parse("1.2.3"),
+                    previousStableRelease: Version.parse("1.2.3"),
                     unreleasedCommits: [{
                         sha: "sha0",
                         message: "New commit",
@@ -304,6 +309,7 @@ describe("Manifest", () => {
                 vi.spyOn(logger, "info");
                 vi.mocked(determineReleaseContext).mockResolvedValue({
                     previousRelease: Version.parse("1.2.3"),
+                    previousStableRelease: Version.parse("1.2.3"),
                     unreleasedCommits: [{
                         sha: "sha0",
                         message: "New commit",
@@ -334,6 +340,7 @@ describe("Manifest", () => {
             tag: "v1.2.4",
             notes: "notes",
             pullRequestNumber: 4,
+            prerelease: false,
         }
 
         it("does nothing if there is nothing to release", async () => {
@@ -427,6 +434,147 @@ describe("Manifest", () => {
         });
     });
 
+    // See determineReleaseContext.ts (`previousStableRelease`) and manifestConfig.ts (`ComponentConfig.prereleaseType`).
+    describe("computeCandidate with a configured prereleaseType", () => {
+        function createManifestWithPrereleaseType(prereleaseType: string | undefined): Manifest {
+            const github = new Github(repository, token, logger);
+            return Manifest.forComponent(github, repository, "main", "", "", [""], undefined, prereleaseType);
+        }
+
+        function fixCommit(): Commit {
+            return { sha: "sha0", message: "Fix a bug", isMergeCommit: false };
+        }
+
+        function breakingChangeCommit(): Commit {
+            return {
+                sha: "sha0",
+                message: "Breaking change",
+                isMergeCommit: true,
+                pullRequest: {
+                    number: 1,
+                    title: "Breaking change",
+                    body: "body",
+                    permalink: "permalink",
+                    headBranchName: "head",
+                    baseBranchName: "main",
+                    labels: ["feat!"],
+                },
+            };
+        }
+
+        beforeEach(() => {
+            createGithubMock();
+            vi.mocked(buildStrategy).mockReturnValue({
+                config: { github: new Github(repository, token, logger) },
+                async determineUpdates(_options: UpdateOptions): Promise<Update[]> {
+                    return [];
+                }
+            });
+        });
+
+        it("starts a new pre-release train (fresh identifier, no number yet) when there is no train in progress", async () => {
+            vi.mocked(determineReleaseContext).mockResolvedValue({
+                previousRelease: Version.parse("1.2.3"),
+                previousStableRelease: Version.parse("1.2.3"),
+                unreleasedCommits: [fixCommit()],
+            });
+
+            const candidate = await createManifestWithPrereleaseType("beta").computeCandidate("rust");
+            expect(candidate?.releaseVersion).toEqual(Version.parse("1.2.4-beta"));
+        });
+
+        it("increments the identifier's trailing number when continuing the same train", async () => {
+            vi.mocked(determineReleaseContext).mockResolvedValue({
+                previousRelease: Version.parse("1.3.0-beta.1"),
+                previousStableRelease: Version.parse("1.2.3"),
+                unreleasedCommits: [fixCommit()],
+            });
+
+            const candidate = await createManifestWithPrereleaseType("beta").computeCandidate("rust");
+            expect(candidate?.releaseVersion).toEqual(Version.parse("1.3.0-beta.2"));
+        });
+
+        // Regression test: a `prereleaseType` that itself ends in a number (e.g. "rc.1") must not be confused
+        // with the train's own counter — see `incrementTrainCounter` in manifest.ts. Before that fix, this
+        // sequence would produce "rc.1" -> "rc.2" -> "rc.1" again (the counter increment mutated part of the
+        // configured type instead of an isolated counter), silently reusing an already-published tag on the
+        // third release.
+        it("keeps incrementing a numbered prereleaseType's own counter, without conflating it with the type's trailing number", async () => {
+            vi.mocked(determineReleaseContext).mockResolvedValue({
+                previousRelease: Version.parse("1.2.3"),
+                previousStableRelease: Version.parse("1.2.3"),
+                unreleasedCommits: [fixCommit()],
+            });
+            let candidate = await createManifestWithPrereleaseType("rc.1").computeCandidate("rust");
+            expect(candidate?.releaseVersion).toEqual(Version.parse("1.2.4-rc.1"));
+
+            vi.mocked(determineReleaseContext).mockResolvedValue({
+                previousRelease: Version.parse("1.2.4-rc.1"),
+                previousStableRelease: Version.parse("1.2.3"),
+                unreleasedCommits: [fixCommit()],
+            });
+            candidate = await createManifestWithPrereleaseType("rc.1").computeCandidate("rust");
+            expect(candidate?.releaseVersion).toEqual(Version.parse("1.2.4-rc.1.1"));
+
+            vi.mocked(determineReleaseContext).mockResolvedValue({
+                previousRelease: Version.parse("1.2.4-rc.1.1"),
+                previousStableRelease: Version.parse("1.2.3"),
+                unreleasedCommits: [fixCommit()],
+            });
+            candidate = await createManifestWithPrereleaseType("rc.1").computeCandidate("rust");
+            expect(candidate?.releaseVersion).toEqual(Version.parse("1.2.4-rc.1.2"));
+        });
+
+        it("keeps a mid-train bump that a prior tag already reflects, even when the only new commit is trivial", async () => {
+            // previousRelease already reflects a major bump over the stable baseline (from an earlier commit
+            // in the train); the only unreleased commit since then is a trivial fix, which alone would only
+            // justify a patch bump — the major bump must not be lost.
+            vi.mocked(determineReleaseContext).mockResolvedValue({
+                previousRelease: Version.parse("2.0.0-beta.1"),
+                previousStableRelease: Version.parse("1.2.3"),
+                unreleasedCommits: [fixCommit()],
+            });
+
+            const candidate = await createManifestWithPrereleaseType("beta").computeCandidate("rust");
+            expect(candidate?.releaseVersion).toEqual(Version.parse("2.0.0-beta.2"));
+        });
+
+        it("starts a fresh train at a bigger target when a breaking change lands mid-train", async () => {
+            // The train so far only reflects a minor bump (1.3.0-beta.1); a breaking change now lands, moving
+            // the target past what that identifier covers, so the train restarts fresh at the new target.
+            vi.mocked(determineReleaseContext).mockResolvedValue({
+                previousRelease: Version.parse("1.3.0-beta.1"),
+                previousStableRelease: Version.parse("1.2.3"),
+                unreleasedCommits: [breakingChangeCommit()],
+            });
+
+            const candidate = await createManifestWithPrereleaseType("beta").computeCandidate("rust");
+            expect(candidate?.releaseVersion).toEqual(Version.parse("2.0.0-beta"));
+        });
+
+        it("graduates to a stable release when prereleaseType is no longer configured", async () => {
+            vi.mocked(determineReleaseContext).mockResolvedValue({
+                previousRelease: Version.parse("1.3.0-beta.2"),
+                previousStableRelease: Version.parse("1.2.3"),
+                unreleasedCommits: [fixCommit()],
+            });
+
+            const candidate = await createManifestWithPrereleaseType(undefined).computeCandidate("rust");
+            expect(candidate?.releaseVersion).toEqual(Version.parse("1.3.0"));
+        });
+
+        it("starts fresh (does not increment) when prereleaseType switches to a different word", async () => {
+            vi.mocked(determineReleaseContext).mockResolvedValue({
+                previousRelease: Version.parse("1.3.0-beta.2"),
+                previousStableRelease: Version.parse("1.2.3"),
+                unreleasedCommits: [fixCommit()],
+            });
+
+            const candidate = await createManifestWithPrereleaseType("rc").computeCandidate("rust");
+            expect(candidate?.releaseVersion).toEqual(Version.parse("1.3.0-rc"));
+        });
+    });
+
     describe("with a named component", () => {
         it("computeCandidate/openOrUpdatePullRequest namespaces the tag prefix, branch name and label", async () => {
             const githubMock = createGithubMock({
@@ -437,6 +585,7 @@ describe("Manifest", () => {
 
             vi.mocked(determineReleaseContext).mockResolvedValue({
                 previousRelease: Version.parse("1.2.3"),
+                previousStableRelease: Version.parse("1.2.3"),
                 unreleasedCommits: [{
                     sha: "sha0",
                     message: "New commit",
@@ -472,6 +621,7 @@ describe("Manifest", () => {
                 tag: "api-v1.2.4",
                 notes: "notes",
                 pullRequestNumber: 4,
+                prerelease: false,
             };
 
             vi.mocked(determineReleases).mockResolvedValue([namespacedRelease]);

@@ -44,6 +44,7 @@ describe("scenario: single component lifecycle", () => {
 
         expect(state.releases).toHaveLength(1);
         expect(state.releases[0].tagName).toBe("v0.1.0");
+        expect(state.releases[0].prerelease).toBe(false);
         expect(state.tags.has("v0.1.0")).toBe(true);
         expect(state.getPullRequestOrThrow(firstPr.number).labels).toEqual([taggedLabel("")]);
 

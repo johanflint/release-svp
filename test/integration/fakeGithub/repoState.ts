@@ -50,6 +50,7 @@ export interface FakeRelease {
     tagName: string;
     name: string;
     body: string;
+    prerelease: boolean;
 }
 
 export interface SeedCommitOptions {
@@ -285,7 +286,7 @@ export class RepoState {
         return pr;
     }
 
-    createRelease(options: { tagName: string; name: string; body: string; targetCommitish: string }): FakeRelease {
+    createRelease(options: { tagName: string; name: string; body: string; targetCommitish: string; prerelease: boolean }): FakeRelease {
         if (this.releases.some(release => release.tagName === options.tagName)) {
             throw new FakeAlreadyExistsError(`Release already exists for tag ${options.tagName}`);
         }
@@ -298,6 +299,7 @@ export class RepoState {
             tagName: options.tagName,
             name: options.name,
             body: options.body,
+            prerelease: options.prerelease,
         };
         this.releases.push(release);
         return release;

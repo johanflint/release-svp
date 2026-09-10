@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { Version } from "../src/version";
+import { incrementPrereleaseIdentifier, isValidPrereleaseIdentifier, Version } from "../src/version";
 
 describe("Version", () => {
    describe("parse", () => {
@@ -109,5 +109,68 @@ describe("Version", () => {
 
             expect(`${version}`).toBe("1.2.3-beta+456")
         });
+    });
+});
+
+describe("isValidPrereleaseIdentifier", () => {
+    it("accepts a bare word identifier", () => {
+        expect(isValidPrereleaseIdentifier("beta")).toBe(true);
+    });
+
+    it("accepts a dot-separated identifier", () => {
+        expect(isValidPrereleaseIdentifier("beta.1")).toBe(true);
+        expect(isValidPrereleaseIdentifier("rc.9")).toBe(true);
+    });
+
+    it("accepts an alphanumeric identifier with a trailing number", () => {
+        expect(isValidPrereleaseIdentifier("beta1")).toBe(true);
+    });
+
+    it("rejects an empty string", () => {
+        expect(isValidPrereleaseIdentifier("")).toBe(false);
+    });
+
+    it("rejects a numeric identifier with a leading zero", () => {
+        expect(isValidPrereleaseIdentifier("01")).toBe(false);
+        expect(isValidPrereleaseIdentifier("beta.01")).toBe(false);
+    });
+
+    it("rejects an empty dot-separated segment", () => {
+        expect(isValidPrereleaseIdentifier("rc..1")).toBe(false);
+        expect(isValidPrereleaseIdentifier(".beta")).toBe(false);
+        expect(isValidPrereleaseIdentifier("beta.")).toBe(false);
+    });
+
+    it("rejects whitespace", () => {
+        expect(isValidPrereleaseIdentifier("beta 1")).toBe(false);
+    });
+
+    it("rejects characters outside the SemVer identifier alphabet", () => {
+        expect(isValidPrereleaseIdentifier("beta+meta")).toBe(false);
+        expect(isValidPrereleaseIdentifier("beta/1")).toBe(false);
+    });
+});
+
+describe("incrementPrereleaseIdentifier", () => {
+    it("appends '.1' when there is no trailing number", () => {
+        expect(incrementPrereleaseIdentifier("beta")).toBe("beta.1");
+    });
+
+    it("increments a dot-separated trailing number", () => {
+        expect(incrementPrereleaseIdentifier("beta.1")).toBe("beta.2");
+        expect(incrementPrereleaseIdentifier("rc.9")).toBe("rc.10");
+    });
+
+    it("increments a directly-appended trailing number", () => {
+        expect(incrementPrereleaseIdentifier("beta1")).toBe("beta2");
+    });
+
+    it("preserves zero-padding on the incremented number", () => {
+        expect(incrementPrereleaseIdentifier("beta01")).toBe("beta02");
+        expect(incrementPrereleaseIdentifier("beta.09")).toBe("beta.10");
+    });
+
+    it("appends '.1' when the identifier has no trailing digits at all", () => {
+        expect(incrementPrereleaseIdentifier("alpha1beta")).toBe("alpha1beta.1");
     });
 });
