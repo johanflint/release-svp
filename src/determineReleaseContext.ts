@@ -84,14 +84,22 @@ export async function determineReleaseContext(
     // ("Pre-releases"). Needed so a component mid pre-release train can still compute its next bump from the
     // last stable baseline, and so graduating back to stable can drop the pre-release suffix correctly.
     let previousStableRelease: Version | undefined;
+    // Whether the configured legacy anchor tag (if any) was even seen while scanning tags — lets the
+    // "not found" error below distinguish a missing tag from one that was found but rejected (malformed or
+    // unreachable), for a more actionable message.
+    let legacyAnchorTagSeen = false;
 
     // Tags are scanned newest-first, so a real component-scoped tag (once one exists) is always found before
     // we'd ever consider falling back to the legacy anchor tag below — the fallback only kicks in for this
     // component's very first release after migration.
     for await (const tag of github.tagIterator()) {
         const isLegacyAnchor = tag.name === migration?.legacyAnchorTagName;
+        legacyAnchorTagSeen ||= isLegacyAnchor;
         const version = parseVersionTag(tag.name, componentTagPrefix) ?? (isLegacyAnchor ? parseVersionTag(tag.name, "") : undefined);
         if (!version) {
+            if (isLegacyAnchor) {
+                logger.warn(`Configured legacy anchor tag '${tag.name}' does not look like a valid version tag, ignoring it`);
+            }
             continue;
         }
 
@@ -114,6 +122,18 @@ export async function determineReleaseContext(
     }
 
     if (previousRelease === undefined || previousReleaseIndex === undefined) {
+        // A configured legacy anchor tag is a promise that pre-migration history exists and must be inherited
+        // (see manifestConfig.ts, README.md "Why this can't be automatic") — never silently treat this
+        // component as if it had no release history at all just because the tag is missing, malformed, or
+        // unreachable from `targetBranch`. That would quietly reset it to "unreleased" and let the next
+        // release re-publish an already-released version range under a fresh, wrong baseline.
+        if (migration?.legacyAnchorTagName !== undefined) {
+            const reason = legacyAnchorTagSeen
+                ? `it exists but isn't a valid, reachable version tag on branch '${targetBranch}'`
+                : `no tag with that name was found in the repository`;
+            throw new MigrationLegacyAnchorNotFoundError(migration.legacyAnchorTagName, reason);
+        }
+
         // No tag found that is reachable from the target branch, this is the first release.
         await loadAllCommits();
         const eligibleCommits = migration ? truncateAtCutover(cachedCommits, migration.cutoverCommit) : cachedCommits;
@@ -145,6 +165,17 @@ export interface ReleaseContext {
     previousRelease: Version;
     previousStableRelease: Version;
     unreleasedCommits: Commit[];
+}
+
+// Thrown when a configured `migration.legacyAnchorTag` can't be used as the legacy successor's release
+// baseline (missing, malformed, or unreachable from the target branch). Silently falling back to "no release
+// history" here would discard the pre-migration lineage that tag exists specifically to carry forward —
+// see manifestConfig.ts and README.md ("Why this can't be automatic") — so this must fail the component's
+// release run rather than warn and continue, matching `MigrationCutoverNotFoundError` below.
+export class MigrationLegacyAnchorNotFoundError extends Error {
+    constructor(readonly legacyAnchorTagName: string, reason: string) {
+        super(`Configured 'migration.legacyAnchorTag' ('${legacyAnchorTagName}') could not be used as a release baseline: ${reason}. Fix the tag or the config before running again.`);
+    }
 }
 
 // Thrown when a configured `migration.cutoverCommit` isn't reachable from the target branch's recent history
