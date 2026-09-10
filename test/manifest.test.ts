@@ -494,6 +494,37 @@ describe("Manifest", () => {
             expect(candidate?.releaseVersion).toEqual(Version.parse("1.3.0-beta.2"));
         });
 
+        // Regression test: a `prereleaseType` that itself ends in a number (e.g. "rc.1") must not be confused
+        // with the train's own counter — see `incrementTrainCounter` in manifest.ts. Before that fix, this
+        // sequence would produce "rc.1" -> "rc.2" -> "rc.1" again (the counter increment mutated part of the
+        // configured type instead of an isolated counter), silently reusing an already-published tag on the
+        // third release.
+        it("keeps incrementing a numbered prereleaseType's own counter, without conflating it with the type's trailing number", async () => {
+            vi.mocked(determineReleaseContext).mockResolvedValue({
+                previousRelease: Version.parse("1.2.3"),
+                previousStableRelease: Version.parse("1.2.3"),
+                unreleasedCommits: [fixCommit()],
+            });
+            let candidate = await createManifestWithPrereleaseType("rc.1").computeCandidate("rust");
+            expect(candidate?.releaseVersion).toEqual(Version.parse("1.2.4-rc.1"));
+
+            vi.mocked(determineReleaseContext).mockResolvedValue({
+                previousRelease: Version.parse("1.2.4-rc.1"),
+                previousStableRelease: Version.parse("1.2.3"),
+                unreleasedCommits: [fixCommit()],
+            });
+            candidate = await createManifestWithPrereleaseType("rc.1").computeCandidate("rust");
+            expect(candidate?.releaseVersion).toEqual(Version.parse("1.2.4-rc.1.1"));
+
+            vi.mocked(determineReleaseContext).mockResolvedValue({
+                previousRelease: Version.parse("1.2.4-rc.1.1"),
+                previousStableRelease: Version.parse("1.2.3"),
+                unreleasedCommits: [fixCommit()],
+            });
+            candidate = await createManifestWithPrereleaseType("rc.1").computeCandidate("rust");
+            expect(candidate?.releaseVersion).toEqual(Version.parse("1.2.4-rc.1.2"));
+        });
+
         it("keeps a mid-train bump that a prior tag already reflects, even when the only new commit is trivial", async () => {
             // previousRelease already reflects a major bump over the stable baseline (from an earlier commit
             // in the train); the only unreleased commit since then is a trivial fix, which alone would only

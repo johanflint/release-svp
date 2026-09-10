@@ -230,7 +230,7 @@ function higherNumericTarget(a: Version, b: Version): Version {
 //    the numeric target stays exactly the same (e.g. "1.0.0-beta" -> "1.0.0", not "1.0.1").
 //  - `prereleaseType` configured, and `previousRelease` is already a pre-release of this exact same
 //    major.minor.patch target using this same identifier (or a numbered continuation of it): continue that
-//    train by incrementing its trailing number (e.g. "beta" -> "beta.1", "beta.1" -> "beta.2").
+//    train by incrementing its counter (e.g. "beta" -> "beta.1", "beta.1" -> "beta.2").
 //  - Otherwise (first release of a new train, e.g. after a bump moved the target, or after switching
 //    `prereleaseType` to a different word): start fresh with the configured identifier verbatim.
 function applyPrereleaseType(bumpTarget: Version, previousRelease: Version, prereleaseType: string | undefined): Version {
@@ -243,14 +243,30 @@ function applyPrereleaseType(bumpTarget: Version, previousRelease: Version, prer
         && previousRelease.patch === bumpTarget.patch;
     const continuingTrain = sameTarget && previousRelease.preRelease !== undefined && isContinuationOf(previousRelease.preRelease, prereleaseType);
 
-    const preRelease = continuingTrain ? incrementPrereleaseIdentifier(previousRelease.preRelease!) : prereleaseType;
+    const preRelease = continuingTrain ? incrementTrainCounter(previousRelease.preRelease!, prereleaseType) : prereleaseType;
     return new Version(bumpTarget.major, bumpTarget.minor, bumpTarget.patch, preRelease, bumpTarget.build);
 }
 
 // True when `identifier` is either exactly `prereleaseType` or `prereleaseType` followed by a "." and a
-// numbered continuation (e.g. "beta.3" continues "beta") — the shape `incrementPrereleaseIdentifier` always
-// produces. Guards against blindly incrementing an unrelated identifier left over from before `prereleaseType`
-// was changed to a different word (e.g. "beta.3" -> "rc" must start fresh at "rc", not "rc.4").
+// numbered continuation (e.g. "beta.3" continues "beta") — the shape `incrementTrainCounter` always produces.
+// Guards against blindly incrementing an unrelated identifier left over from before `prereleaseType` was
+// changed to a different word (e.g. "beta.3" -> "rc" must start fresh at "rc", not "rc.4").
 function isContinuationOf(identifier: string, prereleaseType: string): boolean {
     return identifier === prereleaseType || identifier.startsWith(`${prereleaseType}.`);
 }
+
+// Increments the numbered counter appended after `prereleaseType`'s own (fixed) prefix, e.g. "beta" -> "beta.1"
+// -> "beta.2". The counter is isolated from `prereleaseType` before incrementing it — rather than incrementing
+// the trailing digits of the whole identifier — because `prereleaseType` itself is allowed to end in a number
+// (e.g. "rc.1"): incrementing the whole string would then increment part of the *type*, not the counter, and
+// the result would stop being recognised as a continuation by `isContinuationOf` on the very next release,
+// causing the train to silently restart and collide with an already-published tag.
+function incrementTrainCounter(identifier: string, prereleaseType: string): string {
+    if (identifier === prereleaseType) {
+        return `${prereleaseType}.1`;
+    }
+
+    const counter = identifier.slice(prereleaseType.length + 1); // strip the "<prereleaseType>." prefix
+    return `${prereleaseType}.${incrementPrereleaseIdentifier(counter)}`;
+}
+
