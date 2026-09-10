@@ -289,6 +289,64 @@ describe("determineReleaseContext", () => {
                 "Migration cutover commit 'does-not-exist' not found in recent commits, refusing to release without it (check 'migration.cutoverCommit' in release-svp-config.json)",
             );
         });
+
+        // Regression tests: a configured `migration.legacyAnchorTag` that can't actually be resolved to a
+        // release baseline must fail loudly, rather than silently falling into the "no release history at
+        // all" path and resetting the legacy successor's version to 0.0.0 — see MigrationLegacyAnchorNotFoundError.
+        it("throws MigrationLegacyAnchorNotFoundError when no tag with the configured name exists at all", async () => {
+            vi.spyOn(github, "tagIterator").mockImplementation(async function* (): AsyncGenerator<Tag> {
+                // Some other, unrelated tag exists, but not the configured anchor.
+                yield { sha: legacyCommit.sha, name: "some-other-tag", committedDate: "" };
+            });
+            vi.spyOn(github, "mergeCommitIterator").mockImplementation(async function* () {
+                yield postCutoverACommit;
+                yield cutoverCommit;
+                yield legacyCommit;
+            });
+
+            await expect(determineReleaseContext(github, "main", "a-", "a", ["a", "b"], {
+                cutoverCommit: cutoverCommit.sha,
+                legacyAnchorTagName: "v1.4.0",
+            })).rejects.toThrow(
+                "Configured 'migration.legacyAnchorTag' ('v1.4.0') could not be used as a release baseline: no tag with that name was found in the repository. Fix the tag or the config before running again.",
+            );
+        });
+
+        it("throws MigrationLegacyAnchorNotFoundError when the anchor tag exists but isn't a valid version tag", async () => {
+            vi.spyOn(github, "tagIterator").mockImplementation(async function* (): AsyncGenerator<Tag> {
+                yield { sha: legacyCommit.sha, name: "not-a-version", committedDate: "" };
+            });
+            vi.spyOn(github, "mergeCommitIterator").mockImplementation(async function* () {
+                yield postCutoverACommit;
+                yield cutoverCommit;
+                yield legacyCommit;
+            });
+
+            await expect(determineReleaseContext(github, "main", "a-", "a", ["a", "b"], {
+                cutoverCommit: cutoverCommit.sha,
+                legacyAnchorTagName: "not-a-version",
+            })).rejects.toThrow(
+                "Configured 'migration.legacyAnchorTag' ('not-a-version') could not be used as a release baseline: it exists but isn't a valid, reachable version tag on branch 'main'. Fix the tag or the config before running again.",
+            );
+        });
+
+        it("throws MigrationLegacyAnchorNotFoundError when the anchor tag exists but isn't reachable from the target branch", async () => {
+            vi.spyOn(github, "tagIterator").mockImplementation(async function* (): AsyncGenerator<Tag> {
+                yield { sha: "unreachable-sha", name: "v1.4.0", committedDate: "" };
+            });
+            vi.spyOn(github, "mergeCommitIterator").mockImplementation(async function* () {
+                yield postCutoverACommit;
+                yield cutoverCommit;
+                // "legacyCommit" (and thus "unreachable-sha") is never reachable from this branch's history.
+            });
+
+            await expect(determineReleaseContext(github, "main", "a-", "a", ["a", "b"], {
+                cutoverCommit: cutoverCommit.sha,
+                legacyAnchorTagName: "v1.4.0",
+            })).rejects.toThrow(
+                "Configured 'migration.legacyAnchorTag' ('v1.4.0') could not be used as a release baseline: it exists but isn't a valid, reachable version tag on branch 'main'. Fix the tag or the config before running again.",
+            );
+        });
     });
 });
 
