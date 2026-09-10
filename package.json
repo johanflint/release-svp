@@ -2,13 +2,36 @@
   "name": "release-svp",
   "version": "0.1.0",
   "description": "Create pull requests based on Github labels",
-  "main": "dist/index.js",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/johanflint/release-svp.git"
+  },
+  "homepage": "https://github.com/johanflint/release-svp#readme",
+  "keywords": [
+    "release-please",
+    "release-automation",
+    "changelog",
+    "semver",
+    "github-actions",
+    "cli"
+  ],
+  "bin": {
+    "release-svp": "dist/index.mjs"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "start": "node dist/index.mjs",
     "test": "vitest run",
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "build": "tsc --noEmit && vite build",
-    "watch": "vite build --watch"
+    "watch": "vite build --watch",
+    "prepublishOnly": "npm run build"
   },
   "dependencies": {
     "@google-automations/git-file-utils": "^3.0.0",
@@ -32,6 +55,5 @@
     "vite-plugin-raw": "^1.0.3",
     "vite-plugin-string": "^1.2.3",
     "vitest": "^4.0.9"
-  },
-  "private": true
+  }
 }

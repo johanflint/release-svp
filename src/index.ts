@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 import yargs, { ArgumentsCamelCase, Argv, CommandModule } from "yargs";
 import "source-map-support/register";
 import { hideBin } from "yargs/helpers";

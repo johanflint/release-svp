@@ -40,19 +40,17 @@ jobs:
   release:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-      - run: npm ci
-      - run: npm run build
-
       # Tags + publishes a GitHub Release if the push just merged a release pull request.
-      - run: node dist/index.mjs release --repo-url ${{ github.repository }} --token ${{ secrets.GITHUB_TOKEN }}
+      - run: npx --yes release-svp@0.1.0 release --repo-url ${{ github.repository }} --token ${{ secrets.GITHUB_TOKEN }}
 
       # Opens/updates the pull request for the *next* release, reflecting anything merged since.
-      - run: node dist/index.mjs prepare --repo-url ${{ github.repository }} --token ${{ secrets.GITHUB_TOKEN }} --release-type rust
+      - run: npx --yes release-svp@0.1.0 prepare --repo-url ${{ github.repository }} --token ${{ secrets.GITHUB_TOKEN }} --release-type rust
 ```
+
+`release-svp` is installed on the fly via `npx` — no need to check out the repository or install its own
+dependencies, since the tool talks to GitHub's API directly rather than operating on a local checkout. Pin the
+version (`release-svp@0.1.0`) rather than using `@latest`, so an upstream release can't silently change your
+release behaviour underneath you; bump it deliberately when you want a newer version.
 
 `--release-type` is only required for single-project mode (it's ignored, but harmless to pass, once a
 `release-svp-config.json` exists, since each component then declares its own `releaseType`). `--repo-url` takes
@@ -70,9 +68,8 @@ unnamed ("root") component. Pass `--release-type` on the command line to select 
 To release multiple independently-versioned components from a single repository (a monorepo), add a
 `release-svp-config.json` at the repository root:
 
-```jsonc
+```json
 {
-  // Optional; defaults to the repository's default branch.
   "targetBranch": "main",
 
   "components": [
@@ -82,6 +79,7 @@ To release multiple independently-versioned components from a single repository 
 }
 ```
 
+- `targetBranch` is optional; defaults to the repository's default branch.
 - `component` is a stable identifier used to namespace tags (`project-a-v1.2.3`), branches
   (`release-svp--project-a--main`) and labels (`autorelease: pending (project-a)`). It's independent of `path`,
   so a directory can be renamed without losing release history.
@@ -105,7 +103,7 @@ By default, when 2 or more components have unreleased changes at the same time, 
 fully independent version bump, changelog and tag — grouping only affects the pull request itself, which now
 has one section per component (each clearly marked, so it's still obvious what's being released):
 
-```jsonc
+```json
 {
   "components": [
     { "component": "ios-client", "path": "ios", "releaseType": "rust" },
@@ -125,7 +123,7 @@ bundled together just because they happen to release at the same time. Set `rele
 control this explicitly — components sharing the same `releaseGroup` value are bundled together, independently
 of any other component:
 
-```jsonc
+```json
 {
   "components": [
     { "component": "ios-client", "path": "mobile/ios", "releaseType": "rust", "releaseGroup": "mobile" },
@@ -157,8 +155,8 @@ repository can be told apart at a glance without opening each one:
 
 To keep one-pull-request-per-component behaviour instead, with no bundling at all, set:
 
-```jsonc
-{ "separatePullRequests": true, "components": [ /* ... */ ] }
+```json
+{ "separatePullRequests": true, "components": [ { "component": "project-a", "path": "a", "releaseType": "rust" } ] }
 ```
 
 This is a repository-wide escape hatch — it's rejected by config validation if any component also declares
@@ -186,7 +184,7 @@ start using combined pull requests going forward.
 Set `prereleaseType` on a component to have its releases carry a SemVer pre-release identifier (e.g.
 `1.2.0-beta`), published to GitHub as a pre-release rather than a regular release:
 
-```jsonc
+```json
 {
   "components": [
     { "component": "project-a", "path": "a", "releaseType": "rust", "prereleaseType": "beta" }
@@ -244,37 +242,36 @@ repository into components `a` (continuing the old repository's identity) and `b
 couldn't reference its own not-yet-computed sha if it were added in the very same commit that reorganizes the
 repository.
 
-```jsonc
+```json
 {
   "components": [
     { "component": "a", "path": "a", "releaseType": "rust" },
     { "component": "b", "path": "b", "releaseType": "rust" }
   ],
   "migration": {
-    // The commit that reorganized the repository into the new component layout (commit R) — an earlier, separate
-    // commit from the one that adds this config (commit C; see above for why they can't be the same commit).
-    // Commits at or before this one predate any component concept and are never considered "unreleased" for any
-    // component — this also excludes the reorganization commit itself from every component's changelog.
     "cutoverCommit": "<full 40-character sha of commit R>",
-
-    // Which component (if any) continues the old repository's release history. Omit entirely if none should
-    // (e.g. the repository is being split into components that are all conceptually new).
     "legacyRootSuccessor": "a",
-
-    // Required whenever 'legacyRootSuccessor' is set. The exact, last tag created under the OLD, unscoped
-    // scheme — used once, as a fallback, only until 'a' has created its own first component-scoped tag
-    // (e.g. "a-v1.5.0"). Must be given explicitly; see "Why this can't be automatic" above.
     "legacyAnchorTag": "v1.4.0",
-
-    // Every component that is NOT the legacy successor has no history to inherit and must declare an explicit
-    // starting version — release-svp will refuse to load the config otherwise, rather than silently start it
-    // at 0.0.0.
     "bootstrapVersions": {
       "b": "0.1.0"
     }
   }
 }
 ```
+
+- `cutoverCommit`: the commit that reorganized the repository into the new component layout (commit `R`) — an
+  earlier, separate commit from the one that adds this config (commit `C`; see above for why they can't be the
+  same commit). Commits at or before this one predate any component concept and are never considered
+  "unreleased" for any component — this also excludes the reorganization commit itself from every component's
+  changelog.
+- `legacyRootSuccessor`: which component (if any) continues the old repository's release history. Omit entirely
+  if none should (e.g. the repository is being split into components that are all conceptually new).
+- `legacyAnchorTag`: required whenever `legacyRootSuccessor` is set. The exact, last tag created under the OLD,
+  unscoped scheme — used once, as a fallback, only until `a` has created its own first component-scoped tag
+  (e.g. `"a-v1.5.0"`). Must be given explicitly; see "Why this can't be automatic" above.
+- `bootstrapVersions`: every component that is NOT the legacy successor has no history to inherit and must
+  declare an explicit starting version — release-svp will refuse to load the config otherwise, rather than
+  silently start it at `0.0.0`.
 
 With this config:
 - `a`'s next release picks up from `v1.4.0` (e.g. `a-v1.5.0`), including only commits after `cutoverCommit` —
