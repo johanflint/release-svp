@@ -8,7 +8,7 @@ import { buildStrategy, strategyTypes } from "../src/strategyFactory";
 describe("strategyFactory", () => {
     describe("strategyTypes", () => {
         it("returns all strategies", () => {
-            expect(strategyTypes()).toEqual(["rust"]);
+            expect(strategyTypes()).toEqual(["node", "rust"]);
         });
     });
 

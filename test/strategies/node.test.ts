@@ -1,40 +1,21 @@
-import { GitHubFileContents } from "@google-automations/git-file-utils";
-import init from "@rainbowatcher/toml-edit-js";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { ChangelogUpdater } from "../../src/changelogUpdater";
 import { Github } from "../../src/github";
 import { logger } from "../../src/logger";
-import { RustStrategy } from "../../src/strategies/rust";
+import { NodeStrategy } from "../../src/strategies/node";
 import { UpdateOptions } from "../../src/strategy";
-import { CargoLock } from "../../src/updaters/rust/cargoLock";
-import { CargoToml } from "../../src/updaters/rust/cargoToml";
+import { PackageJson } from "../../src/updaters/node/packageJson";
+import { PackageLockJson } from "../../src/updaters/node/packageLockJson";
 import { Version } from "../../src/version";
 
-vi.mock("../../src/updaters/rust/cargoLock", () => ({
-    CargoLock: vi.fn(),
-}));
-
-
-describe("RustStrategy", () => {
+describe("NodeStrategy", () => {
     const github = new Github({ repo: "repo", owner: "owner" }, "token", logger)
-    const strategy = new RustStrategy({ github });
+    const strategy = new NodeStrategy({ github });
     const updateOptions: UpdateOptions = {
         changelogEntry: "# 1.0.0",
         releaseVersion: Version.parse("1.0.0"),
         targetBranch: "main",
     };
-
-    beforeEach(async () => {
-        await init();
-
-        const response: GitHubFileContents = {
-            sha: "",
-            content: "",
-            parsedContent: "[package]\nname = 'my-package'\n",
-            mode: ""
-        }
-        vi.spyOn(github, "retrieveFileContents").mockResolvedValue(response);
-    });
 
     it("returns the changelog updater", async () => {
         const updates = await strategy.determineUpdates(updateOptions);
@@ -45,29 +26,26 @@ describe("RustStrategy", () => {
         });
     });
 
-    it("returns the Cargo.toml updater", async () => {
+    it("returns the package.json updater", async () => {
         const updates = await strategy.determineUpdates(updateOptions);
         expect(updates).toContainEqual({
-            path: "Cargo.toml",
+            path: "package.json",
             createIfMissing: false,
-            updater: expect.any(CargoToml),
+            updater: expect.any(PackageJson),
         });
     });
 
-    it("returns the Cargo.lock updater", async () => {
+    it("returns the package-lock.json updater", async () => {
         const updates = await strategy.determineUpdates(updateOptions);
         expect(updates).toContainEqual({
-            path: "Cargo.lock",
+            path: "package-lock.json",
             createIfMissing: false,
-            updater: expect.any(CargoLock),
+            updater: expect.any(PackageLockJson),
         });
-
-        const versionsMap = new Map([["my-package", updateOptions.releaseVersion]]);
-        expect(CargoLock).toHaveBeenCalledWith(versionsMap);
     });
 
     describe("with a component path", () => {
-        const componentStrategy = new RustStrategy({ github, componentPath: "a" });
+        const componentStrategy = new NodeStrategy({ github, componentPath: "a" });
 
         it("prefixes the changelog path", async () => {
             const updates = await componentStrategy.determineUpdates(updateOptions);
@@ -78,22 +56,21 @@ describe("RustStrategy", () => {
             });
         });
 
-        it("prefixes the Cargo.toml path and reads it from that location", async () => {
+        it("prefixes the package.json path", async () => {
             const updates = await componentStrategy.determineUpdates(updateOptions);
             expect(updates).toContainEqual({
-                path: "a/Cargo.toml",
+                path: "a/package.json",
                 createIfMissing: false,
-                updater: expect.any(CargoToml),
+                updater: expect.any(PackageJson),
             });
-            expect(github.retrieveFileContents).toHaveBeenCalledWith("a/Cargo.toml", updateOptions.targetBranch);
         });
 
-        it("prefixes the Cargo.lock path", async () => {
+        it("prefixes the package-lock.json path", async () => {
             const updates = await componentStrategy.determineUpdates(updateOptions);
             expect(updates).toContainEqual({
-                path: "a/Cargo.lock",
+                path: "a/package-lock.json",
                 createIfMissing: false,
-                updater: expect.any(CargoLock),
+                updater: expect.any(PackageLockJson),
             });
         });
     });
