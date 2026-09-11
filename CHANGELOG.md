@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.1.1 (2026-09-11)
+
+### Build System
+
+- Fix release workflow npx resolution ([#20](https://github.com/johanflint/release-svp/pull/20))
+- Staged publishing to npm ([#19](https://github.com/johanflint/release-svp/pull/19))
+
 ## v0.1.0 (2026-09-11)
 
 ### Features

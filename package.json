@@ -1,6 +1,6 @@
 {
   "name": "release-svp",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Create pull requests based on Github labels",
   "license": "Apache-2.0",
   "repository": {
