@@ -22,11 +22,6 @@ jobs:
   release:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0 # full history + tags, needed by the "Check for a new tag" step below
-
       - name: Install node
         uses: actions/setup-node@v4
         with:
@@ -36,6 +31,11 @@ jobs:
       # Pinned to a published version so every run uses the exact same tested artifact, not whatever
       # happens to be on `main` at push time. Bump this after each release (a normal commit, tracked like
       # any other unreleased change).
+      #
+      # These two steps run before checkout, in a directory with no local `package.json`, on purpose: they
+      # only talk to the GitHub API (no local git access needed), and running them from this repo's own
+      # checkout would make `npx` resolve "release-svp" against the local, not-yet-built package.json/bin
+      # instead of fetching it from the registry, failing instantly with "release-svp: not found".
 
       # Tags + creates a GitHub Release if the push just merged a release pull request.
       - name: Release
@@ -44,6 +44,11 @@ jobs:
       # Opens/updates the pull request for the *next* release, reflecting anything merged since.
       - name: Prepare
         run: npx --yes release-svp@0.1.0 prepare --repo-url ${{ github.repository }} --token ${{ secrets.GITHUB_TOKEN }} --release-type node
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # full history + tags, needed by the "Check for a new tag" step below
 
       # Only true when the `Release` step above just tagged this commit — i.e. this push merged a release
       # pull request. Ordinary feature/fix merges leave HEAD untagged, so this (and the publish step below)
