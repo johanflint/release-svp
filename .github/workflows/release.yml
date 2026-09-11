@@ -8,6 +8,7 @@ on:
 permissions:
   contents: write
   pull-requests: write
+  id-token: write # required for `npm publish --provenance`
 
 # Serializes runs so two merges landing close together can't race to force-update the same release pull
 # request branch (a later-finishing-but-stale run could otherwise silently drop a commit from the release).
@@ -23,11 +24,14 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # full history + tags, needed by the "Check for a new tag" step below
 
       - name: Install node
         uses: actions/setup-node@v4
         with:
           node-version: 22
+          registry-url: https://registry.npmjs.org
 
       # Pinned to a published version so every run uses the exact same tested artifact, not whatever
       # happens to be on `main` at push time. Bump this after each release (a normal commit, tracked like
@@ -40,3 +44,32 @@ jobs:
       # Opens/updates the pull request for the *next* release, reflecting anything merged since.
       - name: Prepare
         run: npx --yes release-svp@0.1.0 prepare --repo-url ${{ github.repository }} --token ${{ secrets.GITHUB_TOKEN }} --release-type node
+
+      # Only true when the `Release` step above just tagged this commit — i.e. this push merged a release
+      # pull request. Ordinary feature/fix merges leave HEAD untagged, so this (and the publish step below)
+      # cleanly no-op for them.
+      - name: Check for a new tag
+        id: check_tag
+        run: |
+          git fetch --tags
+          if git describe --exact-match --tags HEAD 2>/dev/null; then
+            echo "tagged=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "tagged=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install packages
+        if: steps.check_tag.outputs.tagged == 'true'
+        run: npm ci
+
+      - name: Build
+        if: steps.check_tag.outputs.tagged == 'true'
+        run: npm run build
+
+      # Authenticates via npm Trusted Publishing (OIDC, using the `id-token: write` permission above) —
+      # no npm token/secret needed. The trusted publisher is configured as stage-only on npmjs.com, so this
+      # stages the version rather than publishing it live; a maintainer must promote it afterwards with
+      # `npm publish --otp=<code>` (2FA), or via the npmjs.com package page, before it's publicly installable.
+      - name: Stage publish to npm
+        if: steps.check_tag.outputs.tagged == 'true'
+        run: npm stage publish --provenance
