@@ -29,22 +29,14 @@ jobs:
         with:
           node-version: 22
 
-      - name: Install packages
-        run: npm ci
-
-      - name: Build
-        run: npm run build
-
-      # Bootstrap-only: release-svp isn't published to npm yet, so it can't be run via
-      # `npx release-svp@<version>` (see README.md's documented workflow) — this repo runs its own freshly
-      # built `dist/index.mjs` instead. Once v0.1.0 is published, switch both steps below to
-      # `npx --yes release-svp@0.1.0 ...` and delete the checkout/install/build steps above, matching the
-      # README's documented pattern.
+      # Pinned to a published version so every run uses the exact same tested artifact, not whatever
+      # happens to be on `main` at push time. Bump this after each release (a normal commit, tracked like
+      # any other unreleased change).
 
       # Tags + creates a GitHub Release if the push just merged a release pull request.
       - name: Release
-        run: node dist/index.mjs release --repo-url ${{ github.repository }} --token ${{ secrets.GITHUB_TOKEN }} --release-type node
+        run: npx --yes release-svp@0.1.0 release --repo-url ${{ github.repository }} --token ${{ secrets.GITHUB_TOKEN }} --release-type node
 
       # Opens/updates the pull request for the *next* release, reflecting anything merged since.
       - name: Prepare
-        run: node dist/index.mjs prepare --repo-url ${{ github.repository }} --token ${{ secrets.GITHUB_TOKEN }} --release-type node
+        run: npx --yes release-svp@0.1.0 prepare --repo-url ${{ github.repository }} --token ${{ secrets.GITHUB_TOKEN }} --release-type node
