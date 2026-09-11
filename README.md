@@ -41,7 +41,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       # Tags + publishes a GitHub Release if the push just merged a release pull request.
-      - run: npx --yes release-svp@0.1.0 release --repo-url ${{ github.repository }} --token ${{ secrets.GITHUB_TOKEN }}
+      - run: npx --yes release-svp@0.1.0 release --repo-url ${{ github.repository }} --token ${{ secrets.GITHUB_TOKEN }} --release-type node
 
       # Opens/updates the pull request for the *next* release, reflecting anything merged since.
       - run: npx --yes release-svp@0.1.0 prepare --repo-url ${{ github.repository }} --token ${{ secrets.GITHUB_TOKEN }} --release-type node
@@ -53,8 +53,10 @@ version (`release-svp@0.1.0`) rather than using `@latest`, so an upstream releas
 release behaviour underneath you; bump it deliberately when you want a newer version.
 
 `--release-type` is only required for single-project mode (it's ignored, but harmless to pass, once a
-`release-svp-config.json` exists, since each component then declares its own `releaseType`). `--repo-url` takes
-`owner/repo` (e.g. `${{ github.repository }}`), not a full URL despite the name.
+`release-svp-config.json` exists, since each component then declares its own `releaseType`) — but in that mode
+it's required on *both* commands, `release` as well as `prepare`, since either one can fail to resolve a
+strategy without it. `--repo-url` takes `owner/repo` (e.g. `${{ github.repository }}`), not a full URL despite
+the name.
 
 ## Single-project mode (no config file)
 

@@ -43,7 +43,7 @@ jobs:
 
       # Tags + creates a GitHub Release if the push just merged a release pull request.
       - name: Release
-        run: node dist/index.mjs release --repo-url ${{ github.repository }} --token ${{ secrets.GITHUB_TOKEN }}
+        run: node dist/index.mjs release --repo-url ${{ github.repository }} --token ${{ secrets.GITHUB_TOKEN }} --release-type node
 
       # Opens/updates the pull request for the *next* release, reflecting anything merged since.
       - name: Prepare
