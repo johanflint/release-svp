@@ -6,11 +6,17 @@ import { Version } from "./version";
 export function parseVersionTag(tagName: string, componentPrefix: string = ""): Version | undefined {
     const pattern = new RegExp(`^${escapeRegExp(componentPrefix)}(?<v>v)?(?<version>\\d+\\.\\d+\\.\\d+.*)$`);
     const match = tagName.match(pattern);
-    if (match?.groups) {
-        return Version.parse(match.groups["version"]);
+    if (!match?.groups) {
+        return;
     }
 
-    return;
+    // The regex above is deliberately loose; tags that aren't strict SemVer (e.g. "v1.0.0_old") are ignored
+    // rather than aborting the whole run.
+    try {
+        return Version.parse(match.groups["version"]);
+    } catch {
+        return;
+    }
 }
 
 function escapeRegExp(value: string): string {

@@ -21,6 +21,10 @@ describe("parseVersionTag", () => {
         expect(parseVersionTag("my-tag")).toEqual(undefined);
     });
 
+    test.for(["v1.0.0_old", "v1.0.0-rc.01", "v1.0.0-"])("returns undefined for the non-SemVer tag %s", (input, { expect }) => {
+        expect(parseVersionTag(input)).toEqual(undefined);
+    });
+
     describe("with a component prefix", () => {
         it("parses a tag matching the component prefix", ({ expect }) => {
             expect(parseVersionTag("api-v1.2.3", "api-")).toEqual(new Version(1, 2, 3));
