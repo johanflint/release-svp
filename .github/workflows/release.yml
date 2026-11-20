@@ -75,6 +75,20 @@ jobs:
       # no npm token/secret needed. The trusted publisher is configured as stage-only on npmjs.com, so this
       # stages the version rather than publishing it live; a maintainer must promote it afterwards with
       # `npm publish --otp=<code>` (2FA), or via the npmjs.com package page, before it's publicly installable.
+      # Pre-release versions (e.g. `0.2.0-rc.1`) must not take the default `latest` dist-tag, or a plain
+      # `npm install release-svp` would pick them up. The tag is the first pre-release identifier (`rc`, `beta`).
+      - name: Determine npm dist-tag
+        id: dist_tag
+        if: steps.check_tag.outputs.tagged == 'true'
+        run: |
+          version=$(node -p "require('./package.json').version")
+          if [[ "$version" == *-* ]]; then
+            prerelease="${version#*-}"
+            echo "tag=${prerelease%%[.+]*}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=latest" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Stage publish to npm
         if: steps.check_tag.outputs.tagged == 'true'
-        run: npm stage publish --provenance
+        run: npm stage publish --provenance --tag ${{ steps.dist_tag.outputs.tag }}
