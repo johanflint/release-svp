@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.1.1 (2026-11-20)
+
+### Bug Fixes
+
+- Publish pre-release versions under their own npm dist-tag ([#24](https://github.com/johanflint/release-svp/pull/24))
+- Ignore non-strict SemVer tags in `parseVersionTag` ([#23](https://github.com/johanflint/release-svp/pull/23))
+- Fix incorrect version bump prioritization ([#22](https://github.com/johanflint/release-svp/pull/22))
+
+### Build System
+
+- Fix release workflow npx resolution ([#20](https://github.com/johanflint/release-svp/pull/20))
+- Staged publishing to npm ([#19](https://github.com/johanflint/release-svp/pull/19))
+
 ## v0.1.0 (2026-09-11)
 
 ### Features
