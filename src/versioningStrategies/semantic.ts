@@ -1,8 +1,15 @@
 import { Commit } from "../commit";
-import { MajorVersionUpdate, MinorVersionUpdate, PatchVersionUpdate, VersioningStrategy, VersionUpdater } from "../versioningStrategy";
+import {
+    MajorVersionUpdate,
+    MinorVersionUpdate,
+    PatchVersionUpdate,
+    VersioningStrategy,
+    VersionUpdater
+} from "../versioningStrategy";
 
 export class SemanticVersioningStrategy implements VersioningStrategy {
     releaseType(commits: Commit[]): VersionUpdater {
+        let minor = false;
         for (const commit of commits) {
             if (!commit.isMergeCommit) {
                 continue;
@@ -15,10 +22,10 @@ export class SemanticVersioningStrategy implements VersioningStrategy {
                 }
 
                 if (label === "feat" || label === "feature") {
-                    return new MinorVersionUpdate();
+                    minor = true;
                 }
             }
         }
-        return new PatchVersionUpdate();
+        return minor ? new MinorVersionUpdate() : new PatchVersionUpdate();
     }
 }
