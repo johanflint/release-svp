@@ -79,4 +79,29 @@ describe("SemanticVersioningStrategy", () => {
             expect(strategy.releaseType(commits)).toBeInstanceOf(PatchVersionUpdate);
         });
     });
+
+    describe("with a minor change followed by a breaking change", () => {
+        const pullRequestCommit = (sha: string, labels: string[]): Commit => ({
+            sha,
+            message: "Message",
+            isMergeCommit: true,
+            pullRequest: {
+                sha,
+                number: 42,
+                title: "PR",
+                body: "",
+                permalink: "",
+                headBranchName: "",
+                baseBranchName: "",
+                mergeCommitOid: undefined,
+                labels,
+            },
+        });
+
+        it("returns the major version update regardless of commit order", async () => {
+            const strategy = new SemanticVersioningStrategy();
+            const commits = [pullRequestCommit("sha1", ["feature"]), pullRequestCommit("sha2", ["fix!"])];
+            expect(strategy.releaseType(commits)).toBeInstanceOf(MajorVersionUpdate);
+        });
+    });
 });
