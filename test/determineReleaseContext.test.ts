@@ -156,6 +156,22 @@ describe("determineReleaseContext", () => {
             // unreleasedCommits is still anchored to the newest tag (the pre-release one), same as before this
             // was added — the extra scanning only affects previousStableRelease.
             expect(result.unreleasedCommits).toEqual([featureCommit]);
+            expect(result.commitsSinceStableRelease).toEqual([featureCommit, midTrainCommit]);
+        });
+
+        it("uses the whole history as commitsSinceStableRelease when no stable tag has ever existed", async () => {
+            vi.spyOn(github, "tagIterator").mockImplementation(async function* (): AsyncGenerator<Tag> {
+                yield { sha: betaCommit.sha, name: "1.1.0-beta.1", committedDate: "" };
+            });
+            vi.spyOn(github, "mergeCommitIterator").mockImplementation(async function* () {
+                yield featureCommit;
+                yield betaCommit;
+                yield initialCommit;
+            });
+
+            const result = await determineReleaseContext(github, "main");
+            expect(result.unreleasedCommits).toEqual([featureCommit]);
+            expect(result.commitsSinceStableRelease).toEqual([featureCommit, initialCommit]);
         });
 
         it("falls back to Version.unreleased when no stable tag has ever existed", async () => {
