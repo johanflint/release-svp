@@ -59,26 +59,32 @@ export class Manifest {
             this.migration,
         );
 
-        if (releaseContext.unreleasedCommits.length === 0) {
+        // Graduating (no `prereleaseType` configured while the newest tag is a pre-release) releases everything
+        // since the last *stable* tag, so the stable changelog covers the whole pre-release train and the
+        // release can happen even when nothing was merged after the last pre-release.
+        const graduating = this.prereleaseType === undefined && releaseContext.previousRelease.preRelease !== undefined;
+        const commits = graduating ? releaseContext.commitsSinceStableRelease : releaseContext.unreleasedCommits;
+
+        if (commits.length === 0) {
             logger.info(`No unreleased commits, nothing to do 🕸️`);
             return undefined;
         }
 
-        logger.info(`Previous release is 'v${releaseContext.previousRelease}', ${releaseContext.unreleasedCommits.length} unreleased commit(s)`);
+        logger.info(`Previous release is 'v${releaseContext.previousRelease}', ${commits.length} unreleased commit(s)`);
 
         const versioningStrategy = new SemanticVersioningStrategy();
         // Always compute the numeric bump from the last *stable* release, not merely the last tag of any kind:
         // when this component is mid pre-release train, `previousRelease` may itself already reflect a bump
-        // (e.g. a breaking change) that no longer shows up in `unreleasedCommits` (they only cover commits made
+        // (e.g. a breaking change) that no longer shows up in `commits` (they only cover commits made
         // *after* that tag) — taking whichever of "what the new commits alone call for" and "what
         // `previousRelease` already committed to" is numerically higher recovers that already-committed-to
         // bump so it's never silently lost, and a version can never move backwards.
-        const newTarget = versioningStrategy.releaseType(releaseContext.unreleasedCommits).bump(releaseContext.previousStableRelease);
+        const newTarget = versioningStrategy.releaseType(commits).bump(releaseContext.previousStableRelease);
         const bumpTarget = higherNumericTarget(newTarget, releaseContext.previousRelease);
         const releaseVersion = applyPrereleaseType(bumpTarget, releaseContext.previousRelease, this.prereleaseType);
         logger.info(`Next release is v${releaseVersion}`);
 
-        const changelog = buildChangelog(releaseContext.unreleasedCommits, new PullRequestChangelogNoteBuilder(), releaseVersion)
+        const changelog = buildChangelog(commits, new PullRequestChangelogNoteBuilder(), releaseVersion)
         logger.debug(`Will open one pull request`);
         logger.info("---");
         logger.info(changelog);

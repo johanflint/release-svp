@@ -84,6 +84,8 @@ export async function determineReleaseContext(
     // ("Pre-releases"). Needed so a component mid pre-release train can still compute its next bump from the
     // last stable baseline, and so graduating back to stable can drop the pre-release suffix correctly.
     let previousStableRelease: Version | undefined;
+    let previousStableReleaseIndex: number | undefined;
+    let previousStableReleaseIsLegacyAnchor = false;
     // Whether the configured legacy anchor tag (if any) was even seen while scanning tags — lets the
     // "not found" error below distinguish a missing tag from one that was found but rejected (malformed or
     // unreachable), for a more actionable message.
@@ -117,6 +119,8 @@ export async function determineReleaseContext(
 
         if (!version.preRelease) {
             previousStableRelease = version;
+            previousStableReleaseIndex = index;
+            previousStableReleaseIsLegacyAnchor = isLegacyAnchor;
             break; // Found the newest release and the newest stable release; nothing further to look for.
         }
     }
@@ -138,33 +142,57 @@ export async function determineReleaseContext(
         await loadAllCommits();
         const eligibleCommits = migration ? truncateAtCutover(cachedCommits, migration.cutoverCommit) : cachedCommits;
         const firstRelease = migration?.bootstrapVersion ?? Version.unreleased;
+        const unreleasedCommits = filterCommitsByComponent(eligibleCommits, componentPath, allComponentPaths);
         return {
             previousRelease: firstRelease,
             previousStableRelease: firstRelease,
-            unreleasedCommits: filterCommitsByComponent(eligibleCommits, componentPath, allComponentPaths),
+            unreleasedCommits,
+            commitsSinceStableRelease: unreleasedCommits,
         };
     }
 
-    const rawCommits = cachedCommits.slice(0, previousReleaseIndex);
     // Truncation only applies to the legacy-anchor fallback (see below): once the component has a genuine tag
     // of its own, that tag can only exist after the migration cutover, so its bounded slice is already tighter
     // than the cutover point — re-truncating would just spuriously warn that the (out-of-range) cutover commit
     // "wasn't found".
-    const eligibleCommits = migration && previousReleaseIsLegacyAnchor ? truncateAtCutover(rawCommits, migration.cutoverCommit) : rawCommits;
+    const commitsSince = (index: number, isLegacyAnchor: boolean): Commit[] => {
+        const rawCommits = cachedCommits.slice(0, index);
+        const eligibleCommits = migration && isLegacyAnchor ? truncateAtCutover(rawCommits, migration.cutoverCommit) : rawCommits;
+        return filterCommitsByComponent(eligibleCommits, componentPath, allComponentPaths);
+    };
+
+    const unreleasedCommits = commitsSince(previousReleaseIndex, previousReleaseIsLegacyAnchor);
+    let commitsSinceStableRelease = unreleasedCommits;
+    if (previousStableReleaseIndex !== undefined) {
+        if (previousStableReleaseIndex !== previousReleaseIndex) {
+            commitsSinceStableRelease = commitsSince(previousStableReleaseIndex, previousStableReleaseIsLegacyAnchor);
+        }
+    } else {
+        // No stable tag at all: the whole (cutover-bounded) history is "since the last stable release".
+        await loadAllCommits();
+        const eligibleCommits = migration ? truncateAtCutover(cachedCommits, migration.cutoverCommit) : cachedCommits;
+        commitsSinceStableRelease = filterCommitsByComponent(eligibleCommits, componentPath, allComponentPaths);
+    }
+
     return {
         previousRelease,
         // No stable tag was ever found (either every tag scanned was a pre-release, or the search above never
         // needed to scan that far back before exhausting the tag list) — fall back the same way a component
         // with no release history at all does.
         previousStableRelease: previousStableRelease ?? migration?.bootstrapVersion ?? Version.unreleased,
-        unreleasedCommits: filterCommitsByComponent(eligibleCommits, componentPath, allComponentPaths),
+        unreleasedCommits,
+        commitsSinceStableRelease,
     };
 }
 
 export interface ReleaseContext {
     previousRelease: Version;
     previousStableRelease: Version;
+    // Commits since the newest tag of any kind (including a pre-release tag).
     unreleasedCommits: Commit[];
+    // Commits since the newest *stable* tag. Equal to `unreleasedCommits` unless the newest tag is a pre-release;
+    // used when graduating to a stable release, whose changelog must cover the whole pre-release train.
+    commitsSinceStableRelease: Commit[];
 }
 
 // Thrown when a configured `migration.legacyAnchorTag` can't be used as the legacy successor's release

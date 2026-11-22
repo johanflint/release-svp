@@ -557,10 +557,36 @@ describe("Manifest", () => {
                 previousRelease: Version.parse("1.3.0-beta.2"),
                 previousStableRelease: Version.parse("1.2.3"),
                 unreleasedCommits: [fixCommit()],
+                commitsSinceStableRelease: [fixCommit()],
             });
 
             const candidate = await createManifestWithPrereleaseType(undefined).computeCandidate("rust");
             expect(candidate?.releaseVersion).toEqual(Version.parse("1.3.0"));
+        });
+
+        it("graduates even when nothing was merged since the last pre-release, using the commits since the last stable release", async () => {
+            vi.mocked(determineReleaseContext).mockResolvedValue({
+                previousRelease: Version.parse("1.3.0-beta.2"),
+                previousStableRelease: Version.parse("1.2.3"),
+                unreleasedCommits: [],
+                commitsSinceStableRelease: [fixCommit()],
+            });
+
+            const candidate = await createManifestWithPrereleaseType(undefined).computeCandidate("rust");
+            // The patch bump from 1.2.3 would be 1.2.4, but the previous pre-release already committed to 1.3.0.
+            expect(candidate?.releaseVersion).toEqual(Version.parse("1.3.0"));
+            expect(buildChangelog).toHaveBeenCalledWith([expect.objectContaining({ message: "Fix a bug" })], expect.anything(), candidate?.releaseVersion);
+        });
+
+        it("does nothing when still on a pre-release train and nothing was merged since the last pre-release", async () => {
+            vi.mocked(determineReleaseContext).mockResolvedValue({
+                previousRelease: Version.parse("1.3.0-beta.2"),
+                previousStableRelease: Version.parse("1.2.3"),
+                unreleasedCommits: [],
+                commitsSinceStableRelease: [fixCommit()],
+            });
+
+            expect(await createManifestWithPrereleaseType("beta").computeCandidate("rust")).toBeUndefined();
         });
 
         it("starts fresh (does not increment) when prereleaseType switches to a different word", async () => {
