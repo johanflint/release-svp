@@ -14,6 +14,8 @@ export interface UpdateOptions {
     changelogEntry: string;
     releaseVersion: Version;
     targetBranch: string;
+    // True when this component has never been released before (see ReleaseContext.isFirstRelease).
+    isFirstRelease: boolean;
 }
 
 export interface Strategy {

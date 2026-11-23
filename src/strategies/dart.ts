@@ -20,7 +20,7 @@ export class DartStrategy implements Strategy {
         }, {
             path: pubspecPath,
             createIfMissing: false,
-            updater: new PubspecYaml(options.releaseVersion),
+            updater: new PubspecYaml(options.releaseVersion, options.isFirstRelease),
         }]
     }
 

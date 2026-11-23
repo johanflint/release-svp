@@ -144,6 +144,7 @@ export async function determineReleaseContext(
         const firstRelease = migration?.bootstrapVersion ?? Version.unreleased;
         const unreleasedCommits = filterCommitsByComponent(eligibleCommits, componentPath, allComponentPaths);
         return {
+            isFirstRelease: true,
             previousRelease: firstRelease,
             previousStableRelease: firstRelease,
             unreleasedCommits,
@@ -175,6 +176,7 @@ export async function determineReleaseContext(
     }
 
     return {
+        isFirstRelease: false,
         previousRelease,
         // No stable tag was ever found (either every tag scanned was a pre-release, or the search above never
         // needed to scan that far back before exhausting the tag list) — fall back the same way a component
@@ -186,6 +188,9 @@ export async function determineReleaseContext(
 }
 
 export interface ReleaseContext {
+    // True when no release tag (nor a migration legacy anchor) exists yet, so `previousRelease` is only a
+    // starting point (`0.0.0` or a migration bootstrap version), not something that was actually released.
+    isFirstRelease: boolean;
     previousRelease: Version;
     previousStableRelease: Version;
     // Commits since the newest tag of any kind (including a pre-release tag).

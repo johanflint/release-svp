@@ -91,6 +91,13 @@ export function packageJson(packageName: string, version: string): string {
     return `{\n  "name": "${packageName}",\n  "version": "${version}"\n}\n`;
 }
 
+// Minimal `pubspec.yaml` — `DartStrategy` only updates a pubspec.yaml that already exists (`createIfMissing: false`,
+// see strategies/dart.ts), and `PubspecYaml`'s updater requires a top-level "version" line (see
+// updaters/dart/pubspecYaml.ts). The nested dependency "version" must NOT change.
+export function pubspecYaml(packageName: string, version: string): string {
+    return `name: ${packageName}\n# The app version\nversion: ${version}\n\ndependencies:\n  foo:\n    version: 1.0.0\n`;
+}
+
 // Minimal `lockfileVersion: 3` `package-lock.json` with a single unrelated dependency entry (whose own
 // "version" must NOT change) — `PackageLockJson`'s updater only bumps the root package's two version locations
 // (top-level "version" and `packages[""].version`, see updaters/node/packageLockJson.ts), so this fixture

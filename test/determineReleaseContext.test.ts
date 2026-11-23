@@ -24,6 +24,7 @@ describe("determineReleaseContext", () => {
             });
 
             const result = await determineReleaseContext(github, "main");
+            expect(result.isFirstRelease).toBe(true);
             expect(result.previousRelease).toEqual(Version.unreleased);
             expect(result.unreleasedCommits).toEqual([fixCommit, initialCommit]);
         });
@@ -42,6 +43,7 @@ describe("determineReleaseContext", () => {
             });
 
             const result = await determineReleaseContext(github, "main");
+            expect(result.isFirstRelease).toBe(false);
             expect(result.previousRelease).toEqual(Version.parse("0.1.0"));
             expect(result.unreleasedCommits).toEqual([featureCommit]);
         });
@@ -288,6 +290,7 @@ describe("determineReleaseContext", () => {
                 bootstrapVersion: Version.parse("0.1.0"),
             });
 
+            expect(result.isFirstRelease).toBe(true);
             expect(result.previousRelease).toEqual(Version.parse("0.1.0"));
             expect(result.unreleasedCommits).toEqual([postCutoverBCommit]);
         });

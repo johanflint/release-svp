@@ -14,6 +14,7 @@ Not sure which mode applies to you? Pick one:
 | is a monorepo where every component should release together, as one PR    | [Multi-component mode](#multi-component-mode-release-svp-configjson), default combining behaviour |
 | is a monorepo with unrelated products that must NOT share a pull request  | Multi-component mode + [`releaseGroup`](#grouping-by-releasegroup) |
 | is a monorepo where every component must always get its own pull request  | Multi-component mode + [`separatePullRequests`](#opting-out-separatepullrequests) |
+| already has released versions, but has never used release-svp             | [Adopting release-svp in an existing project](#adopting-release-svp-in-an-existing-project) |
 | already has release history and is only now being split into components  | [Migrating an existing repository](#migrating-an-existing-repository-to-multiple-components) |
 | needs a component to publish beta/rc versions instead of stable releases  | [Pre-releases](#pre-releases) via `prereleaseType` |
 
@@ -80,9 +81,9 @@ the name.
 
 If the repository has no `release-svp-config.json`, release-svp treats the whole repository as a single,
 unnamed ("root") component. Pass `--release-type` on the command line to select the strategy — `rust`
-(`Cargo.toml`/`Cargo.lock`), `node` (`package.json`/`package-lock.json`) or `dart` (`pubspec.yaml`) are currently
-supported. Tags,
-branches and labels are unscoped (e.g. tag `v1.2.3`, branch `release-svp--main`, label `autorelease: pending`).
+(`Cargo.toml`/`Cargo.lock`), `node` (`package.json`/`package-lock.json`) or `dart` (`pubspec.yaml`) are
+currently supported. Tags, branches and labels are unscoped (e.g. tag `v1.2.3`, branch `release-svp--main`,
+label `autorelease: pending`).
 
 ## Multi-component mode (`release-svp-config.json`)
 
@@ -109,9 +110,7 @@ To release multiple independently-versioned components from a single repository 
   (e.g. `"a/nested"` when both `"a"` and `"a/nested"` are configured), the more specific ("longest-prefix-wins")
   path claims it.
 - `releaseType` selects the update strategy for that component: `rust` (`Cargo.toml`/`Cargo.lock`), `node`
-  (`package.json`/`package-lock.json`) or `dart` (`pubspec.yaml`). The `dart` strategy increments an existing build
-  number on every release (`1.2.3+4` becomes `1.3.0+5`), as app stores require it to go up; a `pubspec.yaml`
-  without one stays without.
+  (`package.json`/`package-lock.json`) or `dart` (`pubspec.yaml`, see [Dart build numbers](#dart-build-numbers)).
 - `path: ""` designates a root component that owns anything not claimed by a more specific path. If no
   component declares `path: ""`, files that don't fall under any configured path (e.g. a top-level `README.md`)
   are excluded from every component's release detection — release-svp logs a warning when this happens, but
@@ -234,6 +233,56 @@ Set `prereleaseType` on a component to have its releases carry a SemVer pre-rele
 - A component's version is never allowed to move backwards, regardless of `prereleaseType` changes: switching
   pre-release identifiers, or graduating to stable, always compares against every previously released version
   (both pre-release and stable) and only ever advances.
+
+## Dart build numbers
+
+A `pubspec.yaml` version can carry a build number after a `+`, e.g. `version: 1.2.3+4`. Flutter uses it as the
+Android `versionCode` and the iOS `CFBundleVersion`. The app stores require it to go up with every upload, so
+the `dart` strategy treats it as a counter that keeps increasing across versions:
+
+| `pubspec.yaml` before | Situation                          | `pubspec.yaml` after |
+|-----------------------|------------------------------------|----------------------|
+| `1.2.3+4`             | a previous release exists          | `1.3.0+5`            |
+| `0.0.0+1`             | first release (no release tag yet) | `0.1.0+1`            |
+| `1.2.3`               | any                                | `1.3.0`              |
+| `1.2.3+abc`           | any                                | `1.3.0+abc`          |
+
+- **First release:** the build number in `pubspec.yaml` is used as-is. Set it to the build you want to ship,
+  e.g. `+1` for a new app.
+- **Every release after that:** the build number goes up by one, also across pre-releases (`1.3.0-rc+5` →
+  `1.3.0-rc.1+6` → `1.3.0+7`).
+- **No build number:** none is added. Use this for pure Dart packages, or when CI sets the build number
+  (e.g. `flutter build appbundle --build-number=$GITHUB_RUN_NUMBER`).
+- **Non-numeric build:** left unchanged.
+
+## Adopting release-svp in an existing project
+
+release-svp finds the current version by looking for the newest version tag on the target branch. It does not
+read the version from your version file. Without a tag, it starts from `0.0.0`, so the first release would be
+`0.0.1` or `0.1.0`, even if your project is already at `1.4.0`.
+
+To continue from the version you already released:
+
+1. Make sure your version file (`package.json`, `Cargo.toml` or `pubspec.yaml`) contains the released version.
+2. Tag the commit of that release on your default branch, and push the tag:
+
+   ```shell
+   git tag v1.4.0 <commit>          # single-project mode
+   git tag my-app-v1.4.0 <commit>   # multi-component mode: <component>-v<version>
+   git push origin <tag>
+   ```
+
+3. Add the release-svp workflow. The next release pull request continues from there, e.g. a fix results in
+   `1.4.1`.
+
+Only commits merged after the tagged commit end up in the first changelog.
+
+For a Dart app, the build number continues from `pubspec.yaml` as well: with `version: 1.4.0+57` and the
+`v1.4.0` tag, the next release becomes `1.4.1+58`. Make sure the build number in `pubspec.yaml` is the one from
+your last store upload. If it isn't, set it before adopting; otherwise the store rejects the upload. See
+[Dart build numbers](#dart-build-numbers).
+
+Splitting an existing repository into multiple components is a different situation, see the next section.
 
 ## Migrating an existing repository to multiple components
 
