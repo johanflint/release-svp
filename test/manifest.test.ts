@@ -264,6 +264,7 @@ describe("Manifest", () => {
                         yield existingPullRequest;
                     }),
                     updatePullRequest: vi.fn().mockResolvedValue(existingPullRequest),
+                    isPullRequestUpToDate: vi.fn().mockResolvedValue(true),
                 });
 
                 vi.spyOn(logger, "info");
@@ -290,6 +291,48 @@ describe("Manifest", () => {
                 expect(logger.info).toHaveBeenCalledWith(`Done, pull request https://github.com/owner/repo/pull/2 remained the same`);
                 expect(githubMock.createPullRequest).not.toHaveBeenCalled();
                 expect(githubMock.updatePullRequest).not.toHaveBeenCalled();
+            });
+
+            it("updates the pull request if the title and body are identical but its files are stale", async () => {
+                const existingPullRequest: PullRequest = {
+                    ...pullRequest,
+                    title: "Release v1.2.4",
+                    body: createPullRequestBody([{ componentName: "", notes: undefined as unknown as string }]),
+                    headBranchName: "release-svp--branches-main",
+                    labels: ["autorelease: pending"]
+                };
+
+                const githubMock = createGithubMock({
+                    pullRequestIterator: (async function* () {
+                        yield existingPullRequest;
+                    }),
+                    updatePullRequest: vi.fn().mockResolvedValue(existingPullRequest),
+                    isPullRequestUpToDate: vi.fn().mockResolvedValue(false),
+                });
+
+                vi.spyOn(logger, "info");
+                vi.mocked(determineReleaseContext).mockResolvedValue({
+                    previousRelease: Version.parse("1.2.3"),
+                    previousStableRelease: Version.parse("1.2.3"),
+                    unreleasedCommits: [{
+                        sha: "sha0",
+                        message: "New commit",
+                        isMergeCommit: false,
+                    }],
+                });
+                vi.mocked(buildStrategy).mockReturnValue({
+                    config: { github: new Github({ owner: "owner", repo: "repo" }, token, logger) },
+                    async determineUpdates(_options: UpdateOptions): Promise<Update[]> {
+                        return [];
+                    }
+                });
+
+                const manifest = createManifest();
+
+                await prepareAndOpen(manifest, "rust");
+
+                expect(githubMock.createPullRequest).not.toHaveBeenCalled();
+                expect(githubMock.updatePullRequest).toHaveBeenCalledOnce();
             });
 
             it("does not update the pull request if it is missing the pending label", async () => {

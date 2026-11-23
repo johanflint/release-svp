@@ -119,7 +119,8 @@ export class Manifest {
         }
 
         const existingPullRequest = await this.findExistingPullRequest(pullRequest, this.github);
-        if (existingPullRequest?.body === pullRequest.body && existingPullRequest.title === pullRequest.title) {
+        if (existingPullRequest?.body === pullRequest.body && existingPullRequest.title === pullRequest.title
+            && await this.github.isPullRequestUpToDate(existingPullRequest, [...candidate.updates])) {
             logger.info(`Done, pull request https://github.com/${this.repository.owner}/${this.repository.repo}/pull/${existingPullRequest.number} remained the same`);
             return;
         }
