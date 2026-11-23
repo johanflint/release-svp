@@ -24,6 +24,24 @@ release-svp runs as two separate CLI commands, both meant to run in CI on every 
 - `release` — checks whether a release pull request was just merged, and if so, tags the release and publishes a
   GitHub Release. Safe to run on every push too; it's a no-op if no release pull request is pending merge.
 
+### GitHub configuration
+
+release-svp opens pull requests on your behalf. If the workflow isn't allowed to, `prepare` fails with:
+
+> Failed to prepare release for release unit '<...>' <snip> GitHub Actions is not permitted to create or approve pull requests
+
+To fix this, go to **Settings** → **Actions** → **General**, scroll to **Workflow permissions**, check
+**Allow GitHub Actions to create and approve pull requests** and save.
+
+![Workflow permissions setting](docs/images/allow-actions-create-prs.png)
+
+#### Approving workflow runs
+
+Depending on your repository's settings, the checks on the release pull request may show as awaiting approval.
+A maintainer needs to click **Approve workflows to run** before your jobs start.
+
+![Workflow awaiting approval](docs/images/approve-workflow-runs.png)
+
 ### Example: GitHub Actions workflow
 
 ```yaml
@@ -62,7 +80,8 @@ the name.
 
 If the repository has no `release-svp-config.json`, release-svp treats the whole repository as a single,
 unnamed ("root") component. Pass `--release-type` on the command line to select the strategy — `rust`
-(`Cargo.toml`/`Cargo.lock`) or `node` (`package.json`/`package-lock.json`) are currently supported. Tags,
+(`Cargo.toml`/`Cargo.lock`), `node` (`package.json`/`package-lock.json`) or `dart` (`pubspec.yaml`) are currently
+supported. Tags,
 branches and labels are unscoped (e.g. tag `v1.2.3`, branch `release-svp--main`, label `autorelease: pending`).
 
 ## Multi-component mode (`release-svp-config.json`)
@@ -89,8 +108,10 @@ To release multiple independently-versioned components from a single repository 
   component if its changed files fall under that directory. If a file is under a more specific nested path
   (e.g. `"a/nested"` when both `"a"` and `"a/nested"` are configured), the more specific ("longest-prefix-wins")
   path claims it.
-- `releaseType` selects the update strategy for that component: `rust` (`Cargo.toml`/`Cargo.lock`) or `node`
-  (`package.json`/`package-lock.json`).
+- `releaseType` selects the update strategy for that component: `rust` (`Cargo.toml`/`Cargo.lock`), `node`
+  (`package.json`/`package-lock.json`) or `dart` (`pubspec.yaml`). The `dart` strategy increments an existing build
+  number on every release (`1.2.3+4` becomes `1.3.0+5`), as app stores require it to go up; a `pubspec.yaml`
+  without one stays without.
 - `path: ""` designates a root component that owns anything not claimed by a more specific path. If no
   component declares `path: ""`, files that don't fall under any configured path (e.g. a top-level `README.md`)
   are excluded from every component's release detection — release-svp logs a warning when this happens, but
