@@ -1,5 +1,27 @@
 # Changelog
 
+## v0.2.0 (2026-11-23)
+
+### Features
+
+- Add dart support ([#26](https://github.com/johanflint/release-svp/pull/26))
+
+### Bug Fixes
+
+- Handle Dart build numbers for first release and existing projects ([#27](https://github.com/johanflint/release-svp/pull/27))
+- Include the whole pre-release train when graduating to a stable release ([#25](https://github.com/johanflint/release-svp/pull/25))
+- Ignore non-strict SemVer tags in `parseVersionTag` ([#23](https://github.com/johanflint/release-svp/pull/23))
+- Fix incorrect version bump prioritization ([#22](https://github.com/johanflint/release-svp/pull/22))
+
+### Build System
+
+- Fix release workflow npx resolution ([#20](https://github.com/johanflint/release-svp/pull/20))
+- Staged publishing to npm ([#19](https://github.com/johanflint/release-svp/pull/19))
+
+### Continuous Integration
+
+- Publish pre-release versions under their own npm dist-tag ([#24](https://github.com/johanflint/release-svp/pull/24))
+
 ## v0.1.0 (2026-09-11)
 
 ### Features
