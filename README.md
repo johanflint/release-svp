@@ -24,6 +24,24 @@ release-svp runs as two separate CLI commands, both meant to run in CI on every 
 - `release` — checks whether a release pull request was just merged, and if so, tags the release and publishes a
   GitHub Release. Safe to run on every push too; it's a no-op if no release pull request is pending merge.
 
+### GitHub configuration
+
+release-svp opens pull requests on your behalf. If the workflow isn't allowed to, `prepare` fails with:
+
+> Failed to prepare release for release unit '<...>' <snip> GitHub Actions is not permitted to create or approve pull requests
+
+To fix this, go to **Settings** → **Actions** → **General**, scroll to **Workflow permissions**, check
+**Allow GitHub Actions to create and approve pull requests** and save.
+
+![Workflow permissions setting](docs/images/allow-actions-create-prs.png)
+
+#### Approving workflow runs
+
+Depending on your repository's settings, the checks on the release pull request may show as awaiting approval.
+A maintainer needs to click **Approve workflows to run** before your jobs start.
+
+![Workflow awaiting approval](docs/images/approve-workflow-runs.png)
+
 ### Example: GitHub Actions workflow
 
 ```yaml
