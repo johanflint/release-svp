@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 import { PubspecYaml } from "../../../src/updaters/dart/pubspecYaml";
 import { Version } from "../../../src/version";
 
-function update(releaseVersion: string, content: string | undefined): string {
-    return new PubspecYaml(Version.parse(releaseVersion)).updateContent(content);
+function update(releaseVersion: string, content: string | undefined, isFirstRelease = false): string {
+    return new PubspecYaml(Version.parse(releaseVersion), isFirstRelease).updateContent(content);
 }
 
 describe("PubspecYaml", () => {
@@ -54,6 +54,21 @@ describe("PubspecYaml", () => {
         it("ignores the build of the release version", () => {
             expect(update("1.3.0+9", "version: 1.2.3+4\n")).toBe("version: 1.3.0+5\n");
             expect(update("1.3.0+9", "version: 1.2.3\n")).toBe("version: 1.3.0\n");
+        });
+
+        describe("on the first release", () => {
+            it("keeps the build number as-is", () => {
+                expect(update("0.1.0", "version: 0.0.0+1\n", true)).toBe("version: 0.1.0+1\n");
+                expect(update("1.4.1", "version: 1.4.0+57\n", true)).toBe("version: 1.4.1+57\n");
+            });
+
+            it("does not add a build number when there was none", () => {
+                expect(update("0.1.0", "version: 0.0.0\n", true)).toBe("version: 0.1.0\n");
+            });
+
+            it("keeps a non-numeric build", () => {
+                expect(update("0.1.0", "version: 0.0.0+abc\n", true)).toBe("version: 0.1.0+abc\n");
+            });
         });
     });
 

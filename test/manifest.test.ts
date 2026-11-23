@@ -160,6 +160,7 @@ describe("Manifest", () => {
                 });
 
                 vi.mocked(determineReleaseContext).mockResolvedValue({
+                    isFirstRelease: false,
                     previousRelease: Version.parse("1.2.3"),
                     previousStableRelease: Version.parse("1.2.3"),
                     unreleasedCommits: [{
@@ -185,6 +186,7 @@ describe("Manifest", () => {
                     changelog: undefined,
                     releaseVersion: Version.parse("1.2.4"),
                     targetBranch: "main",
+                    isFirstRelease: false,
                 });
                 expect(githubMock.createPullRequest).not.toHaveBeenCalled();
                 expect(githubMock.updatePullRequest).toHaveBeenCalledWith(

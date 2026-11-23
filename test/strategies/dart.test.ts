@@ -14,6 +14,7 @@ describe("DartStrategy", () => {
         changelogEntry: "# 1.0.0",
         releaseVersion: Version.parse("1.0.0"),
         targetBranch: "main",
+        isFirstRelease: false,
     };
 
     it("returns the changelog updater", async () => {
@@ -32,6 +33,18 @@ describe("DartStrategy", () => {
             createIfMissing: false,
             updater: expect.any(PubspecYaml),
         });
+    });
+
+    it("keeps the pubspec.yaml build number on the first release", async () => {
+        const updates = await strategy.determineUpdates({ ...updateOptions, isFirstRelease: true });
+        const pubspec = updates.find(update => update.path === "pubspec.yaml");
+        expect(pubspec?.updater.updateContent("version: 0.0.0+1\n")).toBe("version: 1.0.0+1\n");
+    });
+
+    it("increments the pubspec.yaml build number after the first release", async () => {
+        const updates = await strategy.determineUpdates(updateOptions);
+        const pubspec = updates.find(update => update.path === "pubspec.yaml");
+        expect(pubspec?.updater.updateContent("version: 0.9.0+1\n")).toBe("version: 1.0.0+2\n");
     });
 
     describe("with a component path", () => {

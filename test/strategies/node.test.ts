@@ -15,6 +15,7 @@ describe("NodeStrategy", () => {
         changelogEntry: "# 1.0.0",
         releaseVersion: Version.parse("1.0.0"),
         targetBranch: "main",
+        isFirstRelease: false,
     };
 
     it("returns the changelog updater", async () => {

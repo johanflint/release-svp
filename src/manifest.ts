@@ -95,6 +95,7 @@ export class Manifest {
             changelogEntry: changelog,
             releaseVersion,
             targetBranch: this.targetBranch,
+            isFirstRelease: releaseContext.isFirstRelease,
         };
         const updates = await strategy.determineUpdates(updateOptions);
 
