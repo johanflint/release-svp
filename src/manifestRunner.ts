@@ -183,7 +183,8 @@ export class ManifestRunner {
             labels,
         };
 
-        if (existingPullRequest?.body === pullRequest.body && existingPullRequest.title === pullRequest.title) {
+        if (existingPullRequest?.body === pullRequest.body && existingPullRequest.title === pullRequest.title
+            && await this.github.isPullRequestUpToDate(existingPullRequest, [...result.updates])) {
             logger.info(`Done, pull request https://github.com/${this.repository.owner}/${this.repository.repo}/pull/${existingPullRequest.number} remained the same`);
             return;
         }

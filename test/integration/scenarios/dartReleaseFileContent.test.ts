@@ -103,4 +103,22 @@ describe("scenario: dart release file content", () => {
         expect(await (await harness.createRunner("dart")).release()).toBe(true);
         expect(state.releases.map(release => release.tagName)).toEqual(["v1.4.1"]);
     });
+
+    it("updates an open pull request whose title and body are unchanged but whose files are stale", async () => {
+        harness = await createHarness();
+        const { state } = harness;
+
+        state.seedCommit({ message: "chore: initial commit", files: { "pubspec.yaml": pubspecYaml("app", "0.0.0+1") } });
+        mergeLabeledPullRequest(state, { branch: "add-widget", files: { "lib/widget.dart": "// a widget\n" }, label: "feature" });
+        expect(await (await harness.createRunner("dart")).prepare()).toBe(true);
+        const pr = state.pullRequests.find(p => p.state === "open")!;
+        expect(state.getFileContent(pr.headBranch, "pubspec.yaml")).toEqual(pubspecYaml("app", "0.1.0+1"));
+
+        // The build number is changed on main, which affects neither the pull request's title nor its body
+        state.seedCommit({ message: "chore: set build number", files: { "pubspec.yaml": pubspecYaml("app", "0.0.0+30") } });
+        expect(await (await harness.createRunner("dart")).prepare()).toBe(true);
+
+        expect(state.pullRequests.filter(p => p.state === "open")).toHaveLength(1);
+        expect(state.getFileContent(pr.headBranch, "pubspec.yaml")).toEqual(pubspecYaml("app", "0.1.0+30"));
+    });
 });

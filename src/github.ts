@@ -289,6 +289,29 @@ export class Github {
         };
     }
 
+    // Whether the files on the pull request's branch already hold what `updates` would write. The title and body
+    // alone can't tell: e.g. a changed build number leaves both identical while the files differ.
+    async isPullRequestUpToDate(pullRequest: PullRequest, updates: Update[]): Promise<boolean> {
+        const changeSet = await this.buildChangeSet(updates, pullRequest.baseBranchName);
+        for (const [path, change] of changeSet) {
+            let current: GitHubFileContents;
+            try {
+                current = await this.retrieveFileContents(path, pullRequest.headBranchName);
+            } catch (e) {
+                if (e instanceof FileNotFoundError) {
+                    return false;
+                }
+                throw e;
+            }
+
+            if (Buffer.from(current.content, "base64").toString("utf8") !== change.content) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     private async buildChangeSet(updates: Update[], targetBranch: string): Promise<ChangeSet> {
         const changeSet = new Map();
         for (const update of updates) {
