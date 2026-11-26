@@ -48,9 +48,16 @@ describe("parseManifestConfig", () => {
         expect(() => parseManifestConfig('"a string"')).toThrow(ManifestConfigError);
     });
 
-    it("throws when 'components' is missing or empty", () => {
-        expect(() => parseManifestConfig("{}")).toThrow(/'components' must be a non-empty array/);
-        expect(() => parseManifestConfig(JSON.stringify({ components: [] }))).toThrow(/'components' must be a non-empty array/);
+    it("throws when neither 'components' nor 'releaseGroups' declares a component", () => {
+        const message = /'components' and 'releaseGroups' must declare at least one component between them/;
+        expect(() => parseManifestConfig("{}")).toThrow(message);
+        expect(() => parseManifestConfig(JSON.stringify({ components: [] }))).toThrow(message);
+        expect(() => parseManifestConfig(JSON.stringify({ components: [], releaseGroups: [] }))).toThrow(message);
+        expect(() => parseManifestConfig(JSON.stringify({ targetBranch: "" }))).toThrow(message);
+    });
+
+    it("throws when 'components' is present but not an array", () => {
+        expect(() => parseManifestConfig(JSON.stringify({ components: {} }))).toThrow(/'components' must be an array when present/);
     });
 
     it("throws when 'targetBranch' is present but not a non-empty string", () => {
@@ -106,6 +113,21 @@ describe("parseManifestConfig", () => {
                 { path: "b", component: "project-b", releaseType: "rust" },
             ],
         }))).toThrow(/duplicate path 'b'/);
+    });
+
+    it.each([
+        ["the top level", { releaseGroup: {}, components: [{ path: "a", component: "a", releaseType: "rust" }] }, "unknown field 'releaseGroup'"],
+        ["a release group", { releaseGroups: [{ name: "g", linked: true, components: [{ path: "a", component: "a", releaseType: "rust" }, { path: "b", component: "b", releaseType: "rust" }] }] }, "releaseGroups[0]: unknown field 'linked'"],
+        ["a component", { components: [{ path: "a", component: "a", releaseType: "rust", prereleseType: "beta" }] }, "components[0]: unknown field 'prereleseType'"],
+        ["migration", { components: [{ path: "a", component: "a", releaseType: "rust" }], migration: { cutoverCommit: "abcdef0123456789abcdef0123456789abcdef01", bootstrapVersions: { a: "0.1.0" }, cutover: "x" } }, "'migration': unknown field 'cutover'"],
+    ])("throws for an unknown field on %s", (_, config, issue) => {
+        try {
+            parseManifestConfig(JSON.stringify(config));
+            expect.fail("expected parseManifestConfig to throw");
+        } catch (e) {
+            expect(e).toBeInstanceOf(ManifestConfigError);
+            expect((e as ManifestConfigError).issues).toEqual([issue]);
+        }
     });
 
     it("collects multiple issues in a single error", () => {
@@ -251,44 +273,160 @@ describe("parseManifestConfig", () => {
         });
     });
 
-    describe("releaseGroup", () => {
-        it("is undefined when absent", () => {
+    describe("releaseGroups", () => {
+        const a = { path: "a", component: "project-a", releaseType: "rust" };
+        const b = { path: "b", component: "project-b", releaseType: "rust" };
+        const c = { path: "c", component: "project-c", releaseType: "rust" };
+
+        it("is empty when absent", () => {
+            const config = parseManifestConfig(JSON.stringify({ components: [a] }));
+            expect(config.releaseGroups).toEqual([]);
+        });
+
+        it("parses release groups next to ungrouped components", () => {
             const config = parseManifestConfig(JSON.stringify({
-                components: [{ path: "a", component: "project-a", releaseType: "rust" }],
+                releaseGroups: [{ name: "platform", components: [a, b] }],
+                components: [c],
             }));
-            expect(config.components[0].releaseGroup).toBeUndefined();
+
+            expect(config.releaseGroups).toEqual([{ name: "platform", components: [a, b] }]);
+            expect(config.components).toEqual([c]);
         });
 
-        it("parses a valid group name", () => {
+        it("accepts a config with only release groups", () => {
             const config = parseManifestConfig(JSON.stringify({
-                components: [
-                    { path: "a", component: "ios-client", releaseType: "rust", releaseGroup: "product-a" },
-                    { path: "b", component: "android-client", releaseType: "rust", releaseGroup: "product-a" },
-                ],
+                releaseGroups: [{ name: "platform", components: [a, b] }],
             }));
-            expect(config.components[0].releaseGroup).toBe("product-a");
-            expect(config.components[1].releaseGroup).toBe("product-a");
+
+            expect(config.releaseGroups).toHaveLength(1);
+            expect(config.components).toEqual([]);
         });
 
-        it("throws when present but empty", () => {
+        it("throws when not an array", () => {
             expect(() => parseManifestConfig(JSON.stringify({
-                components: [{ path: "a", component: "project-a", releaseType: "rust", releaseGroup: "" }],
-            }))).toThrow(/'releaseGroup' must be a non-empty string/);
+                releaseGroups: {},
+                components: [a],
+            }))).toThrow(/'releaseGroups' must be an array when present/);
         });
 
-        it("throws when it contains invalid characters", () => {
+        it("throws when an entry is not an object", () => {
             expect(() => parseManifestConfig(JSON.stringify({
-                components: [{ path: "a", component: "project-a", releaseType: "rust", releaseGroup: "product a" }],
-            }))).toThrow(/'releaseGroup' must only contain letters, digits/);
+                releaseGroups: ["platform"],
+                components: [a],
+            }))).toThrow(/releaseGroups\[0\]: expected an object/);
         });
 
-        it("throws when it matches a configured component's name", () => {
+        it("throws when 'name' is missing or empty", () => {
+            for (const group of [{ components: [a, b] }, { name: "", components: [a, b] }]) {
+                expect(() => parseManifestConfig(JSON.stringify({
+                    releaseGroups: [group],
+                }))).toThrow(/releaseGroups\[0\]: 'name' must be a non-empty string/);
+            }
+        });
+
+        it("throws when 'name' contains invalid characters", () => {
             expect(() => parseManifestConfig(JSON.stringify({
-                components: [
-                    { path: "a", component: "project-a", releaseType: "rust", releaseGroup: "project-b" },
-                    { path: "b", component: "project-b", releaseType: "rust" },
+                releaseGroups: [{ name: "plat form", components: [a, b] }],
+            }))).toThrow(/releaseGroups\[0\]: 'name' must only contain letters, digits/);
+        });
+
+        it("throws when 'components' is missing", () => {
+            expect(() => parseManifestConfig(JSON.stringify({
+                releaseGroups: [{ name: "platform" }],
+                components: [a],
+            }))).toThrow(/releaseGroups\[0\]: 'components' must be an array/);
+        });
+
+        it("throws for an empty group", () => {
+            expect(() => parseManifestConfig(JSON.stringify({
+                releaseGroups: [{ name: "platform", components: [] }],
+                components: [a],
+            }))).toThrow(/releaseGroups\[0\]: a release group must have at least 2 components$/m);
+        });
+
+        it("throws for a group with one component, suggesting to move it to the top-level 'components'", () => {
+            expect(() => parseManifestConfig(JSON.stringify({
+                releaseGroups: [{ name: "platform", components: [a] }],
+            }))).toThrow(/releaseGroups\[0\]: a release group must have at least 2 components — move 'project-a' to the top-level 'components' \(merge or close this group's open release pull request first\)/);
+        });
+
+        it("omits the move hint when the group's only component is invalid", () => {
+            expect(() => parseManifestConfig(JSON.stringify({
+                releaseGroups: [{ name: "platform", components: [{ ...a, releaseType: "cobol" }] }],
+            }))).toThrow(/releaseGroups\[0\]: a release group must have at least 2 components$/m);
+        });
+
+        it("throws for duplicate group names", () => {
+            expect(() => parseManifestConfig(JSON.stringify({
+                releaseGroups: [
+                    { name: "platform", components: [a, b] },
+                    { name: "platform", components: [c, { path: "d", component: "project-d", releaseType: "rust" }] },
                 ],
-            }))).toThrow(/'releaseGroup' value 'project-b' \(on component 'project-a'\) must not match a configured component name/);
+            }))).toThrow(/releaseGroups: duplicate release group name 'platform'/);
+        });
+
+        it.each([
+            ["a grouped", { releaseGroups: [{ name: "project-a", components: [a, b] }] }],
+            ["an ungrouped", { releaseGroups: [{ name: "project-c", components: [a, b] }], components: [c] }],
+        ])("throws when a group name matches %s component's name", (_, config) => {
+            expect(() => parseManifestConfig(JSON.stringify(config)))
+                .toThrow(/releaseGroups: release group name 'project-[ac]' must not match a configured component name/);
+        });
+
+        it("throws for a component name used both in a group and at the top level", () => {
+            expect(() => parseManifestConfig(JSON.stringify({
+                releaseGroups: [{ name: "platform", components: [a, b] }],
+                components: [{ ...c, component: "project-a" }],
+            }))).toThrow(/components\[0\]: duplicate component name 'project-a'/);
+        });
+
+        it("throws for a path used both in a group and at the top level", () => {
+            expect(() => parseManifestConfig(JSON.stringify({
+                releaseGroups: [{ name: "platform", components: [a, b] }],
+                components: [{ ...c, path: "b" }],
+            }))).toThrow(/components\[0\]: duplicate path 'b'/);
+        });
+
+        it("throws for a component name used in two groups", () => {
+            expect(() => parseManifestConfig(JSON.stringify({
+                releaseGroups: [
+                    { name: "platform", components: [a, b] },
+                    { name: "tools", components: [c, { ...a, path: "d" }] },
+                ],
+            }))).toThrow(/releaseGroups\[1\]\.components\[1\]: duplicate component name 'project-a'/);
+        });
+
+        it("reports a group member's issues at its location within the group", () => {
+            expect(() => parseManifestConfig(JSON.stringify({
+                releaseGroups: [{ name: "platform", components: [a, { ...b, releaseType: "cobol" }] }],
+            }))).toThrow(/releaseGroups\[0\]\.components\[1\]: 'releaseType' must be one of/);
+        });
+
+        it("validates 'migration' against grouped components too", () => {
+            const config = parseManifestConfig(JSON.stringify({
+                releaseGroups: [{ name: "platform", components: [a, b] }],
+                components: [c],
+                migration: {
+                    cutoverCommit: "abcdef0123456789abcdef0123456789abcdef01",
+                    bootstrapVersions: { "project-a": "0.1.0", "project-b": "0.1.0", "project-c": "0.1.0" },
+                },
+            }));
+            expect(config.migration?.bootstrapVersions).toEqual({ "project-a": "0.1.0", "project-b": "0.1.0", "project-c": "0.1.0" });
+
+            expect(() => parseManifestConfig(JSON.stringify({
+                releaseGroups: [{ name: "platform", components: [a, b] }],
+                components: [c],
+                migration: {
+                    cutoverCommit: "abcdef0123456789abcdef0123456789abcdef01",
+                    bootstrapVersions: { "project-a": "0.1.0", "project-c": "0.1.0" },
+                },
+            }))).toThrow(/'migration\.bootstrapVersions' is missing a starting version for component 'project-b'/);
+        });
+
+        it("throws when a component still sets the removed 'releaseGroup'", () => {
+            expect(() => parseManifestConfig(JSON.stringify({
+                components: [{ ...a, releaseGroup: "platform" }, b],
+            }))).toThrow(/components\[0\]: 'releaseGroup' is no longer supported — move the component into a 'releaseGroups' entry instead/);
         });
     });
 

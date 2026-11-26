@@ -443,7 +443,7 @@ describe("ManifestRunner", () => {
 
             expect(openOrUpdatePullRequestRoot).toHaveBeenCalledExactlyOnceWith(expect.anything(), "Release v1.0.0");
 
-            // Multi-component mode, no releaseGroup at all, so each component is its own singleton:
+            // Multi-component mode, no release groups at all, so each component is its own singleton:
             // 2+ components are configured in total, so each singleton pull request's title includes its own
             // component name to tell them apart.
             createGithubMock({
@@ -507,10 +507,13 @@ describe("ManifestRunner", () => {
                 createGithubMock({
                     retrieveFileContents: vi.fn().mockResolvedValue({
                         parsedContent: JSON.stringify({
-                            components: [
-                                { path: "a", component: "project-a", releaseType: "rust", releaseGroup: "platform" },
-                                { path: "b", component: "project-b", releaseType: "rust", releaseGroup: "platform" },
-                            ],
+                            releaseGroups: [{
+                                name: "platform",
+                                components: [
+                                    { path: "a", component: "project-a", releaseType: "rust" },
+                                    { path: "b", component: "project-b", releaseType: "rust" },
+                                ],
+                            }],
                         }),
                     }),
                     pullRequestIterator,
@@ -557,10 +560,13 @@ describe("ManifestRunner", () => {
                 createGithubMock({
                     retrieveFileContents: vi.fn().mockResolvedValue({
                         parsedContent: JSON.stringify({
-                            components: [
-                                { path: "a", component: "project-a", releaseType: "rust", releaseGroup: "platform" },
-                                { path: "b", component: "project-b", releaseType: "rust", releaseGroup: "platform" },
-                            ],
+                            releaseGroups: [{
+                                name: "platform",
+                                components: [
+                                    { path: "a", component: "project-a", releaseType: "rust" },
+                                    { path: "b", component: "project-b", releaseType: "rust" },
+                                ],
+                            }],
                         }),
                     }),
                     pullRequestIterator,
@@ -603,10 +609,13 @@ describe("ManifestRunner", () => {
                 createGithubMock({
                     retrieveFileContents: vi.fn().mockResolvedValue({
                         parsedContent: JSON.stringify({
-                            components: [
-                                { path: "a", component: "project-a", releaseType: "rust", releaseGroup: "platform" },
-                                { path: "b", component: "project-b", releaseType: "rust", releaseGroup: "platform" },
-                            ],
+                            releaseGroups: [{
+                                name: "platform",
+                                components: [
+                                    { path: "a", component: "project-a", releaseType: "rust" },
+                                    { path: "b", component: "project-b", releaseType: "rust" },
+                                ],
+                            }],
                         }),
                     }),
                     pullRequestIterator,
@@ -672,16 +681,19 @@ describe("ManifestRunner", () => {
                 expect(openOrUpdatePullRequest).not.toHaveBeenCalled();
             });
 
-            it("opens a combined pull request titled after the releaseGroup for a named group, end-to-end", async () => {
+            it("opens a combined pull request titled after the release group, end-to-end", async () => {
                 const pullRequestIterator = vi.fn().mockImplementation(async function* () {});
                 const createPullRequest = vi.fn().mockResolvedValue({ number: 42 });
                 createGithubMock({
                     retrieveFileContents: vi.fn().mockResolvedValue({
                         parsedContent: JSON.stringify({
-                            components: [
-                                { path: "ios", component: "ios-client", releaseType: "rust", releaseGroup: "mobile" },
-                                { path: "android", component: "android-client", releaseType: "rust", releaseGroup: "mobile" },
-                            ],
+                            releaseGroups: [{
+                                name: "mobile",
+                                components: [
+                                    { path: "ios", component: "ios-client", releaseType: "rust" },
+                                    { path: "android", component: "android-client", releaseType: "rust" },
+                                ],
+                            }],
                         }),
                     }),
                     pullRequestIterator,
@@ -719,9 +731,14 @@ describe("ManifestRunner", () => {
                 createGithubMock({
                     retrieveFileContents: vi.fn().mockResolvedValue({
                         parsedContent: JSON.stringify({
+                            releaseGroups: [{
+                                name: "mobile",
+                                components: [
+                                    { path: "ios", component: "ios-client", releaseType: "rust" },
+                                    { path: "android", component: "android-client", releaseType: "rust" },
+                                ],
+                            }],
                             components: [
-                                { path: "ios", component: "ios-client", releaseType: "rust", releaseGroup: "mobile" },
-                                { path: "android", component: "android-client", releaseType: "rust", releaseGroup: "mobile" },
                                 { path: "backend", component: "backend", releaseType: "rust" },
                             ],
                         }),
@@ -759,10 +776,13 @@ describe("ManifestRunner", () => {
                 createGithubMock({
                     retrieveFileContents: vi.fn().mockResolvedValue({
                         parsedContent: JSON.stringify({
-                            components: [
-                                { path: "a", component: "project-a", releaseType: "rust", releaseGroup: "platform" },
-                                { path: "b", component: "project-b", releaseType: "rust", releaseGroup: "platform" },
-                            ],
+                            releaseGroups: [{
+                                name: "platform",
+                                components: [
+                                    { path: "a", component: "project-a", releaseType: "rust" },
+                                    { path: "b", component: "project-b", releaseType: "rust" },
+                                ],
+                            }],
                         }),
                     }),
                     pullRequestIterator,

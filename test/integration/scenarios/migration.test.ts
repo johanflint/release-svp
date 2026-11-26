@@ -87,7 +87,7 @@ describe("scenario: legacy-successor migration", () => {
         expect(await (await harness.createRunner()).prepare()).toBe(true);
 
         const openPrs = state.pullRequests.filter(pr => pr.state === "open");
-        expect(openPrs).toHaveLength(2); // one per component, since neither declares a releaseGroup
+        expect(openPrs).toHaveLength(2); // one per component, since neither is in a release group
 
         const corePr = openPrs.find(pr => pr.labels.includes(pendingLabel("core")))!;
         const apiPr = openPrs.find(pr => pr.labels.includes(pendingLabel("api")))!;

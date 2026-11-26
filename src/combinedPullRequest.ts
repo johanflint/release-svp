@@ -66,8 +66,8 @@ export function buildCombinedSections(
 // component behaviour) and the combined/grouped case, since which applies depends on repo-wide context (how
 // many components are configured in total) that neither `Manifest` nor `ManifestRunner`'s per-unit dispatch has
 // any reason to duplicate — see README.md ("Release groups"):
-//  - a genuine multi-member unit (2+ components sharing this pull request): the `releaseGroup` name, with no
-//    version, since each member is versioned independently. `releaseVersion` is ignored.
+//  - a release group's unit: the group's name, with no version, since each member is versioned independently.
+//    `releaseVersion` is ignored.
 //  - a singleton unit (exactly one member), when 2+ components are configured in total: the member's own
 //    component name plus its version, so that multiple singleton pull requests in the same repository can still
 //    be told apart from their titles alone. `releaseVersion` is required here.
@@ -81,7 +81,7 @@ export function pullRequestTitle(options: {
 }): string {
     const { unit, totalComponentCount, releaseVersion } = options;
 
-    if (unit.members.length > 1) {
+    if (unit.groupId) {
         return `Release ${unit.groupId}`;
     }
 
@@ -97,7 +97,7 @@ export function pullRequestTitle(options: {
 // `pullRequestCoversComponent`, and determineReleases.ts): its branch or pending label identifies the component,
 // AND its parsed body still covers it. Used to detect a component simultaneously claimed by two open pull
 // requests — e.g. a pre-upgrade, per-component pull request left open when a component joins a release group for
-// the first time, or a pull request left over from before a `releaseGroup` config change moved the component
+// the first time, or a pull request left over from before a `releaseGroups` config change moved the component
 // elsewhere. Both must be resolved manually (by merging/closing the stale pull request) rather than silently
 // picked one way or the other.
 export function findConflictingOpenPullRequest(
