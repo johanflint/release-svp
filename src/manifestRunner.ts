@@ -7,7 +7,7 @@ import { MigrationOptions } from "./determineReleaseContext";
 import { Github } from "./github";
 import { logger, Logger, logger as defaultLogger } from "./logger";
 import { ComponentCandidate, Manifest } from "./manifest";
-import { ComponentConfig, ManifestConfigError, MigrationConfig, parseManifestConfig, ResolvedManifestConfig } from "./manifestConfig";
+import { allComponents, ComponentConfig, ManifestConfig, ManifestConfigError, MigrationConfig, parseManifestConfig, ResolvedManifestConfig } from "./manifestConfig";
 import { createPullRequestBody } from "./pullRequestBody";
 import { Repository } from "./repository";
 import { computeReleaseUnits, ReleaseUnit } from "./releaseUnit";
@@ -34,13 +34,20 @@ async function fetchConfig(github: Github, branch: string): Promise<string | und
 }
 
 export class ManifestRunner {
+    // Every configured component, grouped or not.
+    private readonly components: readonly ComponentConfig[];
+    private readonly units: readonly ReleaseUnit[];
+
     private constructor(
         private readonly github: Github,
         private readonly repository: Repository,
         private readonly targetBranch: string,
-        private readonly components: readonly ComponentConfig[],
+        config: Pick<ManifestConfig, "releaseGroups" | "components">,
         private readonly migration?: MigrationConfig,
-    ) {}
+    ) {
+        this.components = allComponents(config);
+        this.units = computeReleaseUnits(config, targetBranch);
+    }
 
     // Returns `false` if any component failed to prepare, so the caller (e.g. the CLI entrypoint) can reflect
     // that in the process exit status, while still isolating each component's failure from the others below.
@@ -50,8 +57,8 @@ export class ManifestRunner {
     //  1. Compute every component's candidate.
     //  2. `detectDuplicateUpdatePaths` — see there for why two components whose `updates` target the same file
     //     path must abort the whole run rather than risk one silently overwriting the other.
-    //  3. Partition components into release units (see releaseUnit.ts) and detect a component simultaneously
-    //     claimed by two open pull requests (see `findConflictingOpenPullRequest`) — also aborts the whole run,
+    //  3. Detect a component simultaneously claimed by two open pull requests across the release units (see
+    //     releaseUnit.ts and `findConflictingOpenPullRequest`) — also aborts the whole run,
     //     since automatically picking one pull request over the other could discard real, unmerged release notes.
     //  4. Open/update each unit's pull request — a singleton unit (today's one-pull-request-per-component
     //     behaviour, unchanged) via `Manifest.openOrUpdatePullRequest`; a combined unit via
@@ -88,20 +95,18 @@ export class ManifestRunner {
             return false;
         }
 
-        const units = computeReleaseUnits(this.components, this.targetBranch);
-
         const openPullRequests: PullRequest[] = [];
         for await (const pullRequest of this.github.pullRequestIterator(this.targetBranch, "OPEN")) {
             openPullRequests.push(pullRequest);
         }
 
-        if (this.hasConflictingOpenPullRequest(units, openPullRequests)) {
+        if (this.hasConflictingOpenPullRequest(this.units, openPullRequests)) {
             return false;
         }
 
-        for (const unit of units) {
+        for (const unit of this.units) {
             try {
-                if (unit.members.length === 1) {
+                if (!unit.groupId) {
                     const component = unit.members[0];
                     const candidate = candidatesByComponent.get(component.component);
                     if (!candidate) {
@@ -113,9 +118,8 @@ export class ManifestRunner {
                     await this.openOrUpdateCombinedPullRequest(unit, candidatesByComponent, openPullRequests);
                 }
             } catch (e) {
-                // Singleton units (the common case) are identified by their one member's own name here, matching
-                // the wording used everywhere else in this file; only a genuine multi-member unit is identified
-                // by its groupId, since it has no single component name of its own.
+                // Singleton units are identified by their one member's own name here, matching the wording used
+                // everywhere else in this file; a release group's unit is identified by the group's name.
                 const unitLabel = unit.groupId ?? componentLabel(unit.members[0]);
                 logger.error(`Failed to prepare release for release unit '${unitLabel}'`, e);
                 allSucceeded = false;
@@ -127,7 +131,7 @@ export class ManifestRunner {
 
     // Phase 3 of `prepare()`: detects a component simultaneously claimed by two open pull requests — e.g. a
     // pre-upgrade, per-component pull request left open when a component joins a release group for the first
-    // time, or a pull request left over from before a `releaseGroup` config change moved the component
+    // time, or a pull request left over from before a `releaseGroups` config change moved the component
     // elsewhere. Logs one error per conflict found. Like `detectDuplicateUpdatePaths`, any conflict aborts the
     // *entire* run rather than partially proceeding, since automatically picking one pull request over the other
     // could discard real, unmerged release notes.
@@ -154,7 +158,7 @@ export class ManifestRunner {
     ): Promise<void> {
         // Matched by branch name alone, unlike Manifest's singleton lookup (which also requires the pending
         // label) — deliberately so: this is exactly what lets `buildCombinedSections` detect an "orphaned"
-        // component below (one whose label no longer belongs to any current member, e.g. after a `releaseGroup`
+        // component below (one whose label no longer belongs to any current member, e.g. after a `releaseGroups`
         // config change) instead of mistaking it for "no existing pull request" and silently opening a duplicate.
         // Safe in practice because `unit.branchName` is always one of our own reserved, auto-generated branch
         // names (see componentNaming.ts), never one a user would create by hand.
@@ -246,7 +250,7 @@ export class ManifestRunner {
             return null;
         }
 
-        return new ManifestRunner(github, repository, resolved.targetBranch, resolved.components, resolved.migration);
+        return new ManifestRunner(github, repository, resolved.targetBranch, resolved, resolved.migration);
     }
 
     private static async resolveComponents(

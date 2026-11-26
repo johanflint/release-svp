@@ -20,9 +20,9 @@ export function releaseBranchName(targetBranch: string, componentName: string): 
     return `${RELEASE_BRANCH_PREFIX}${targetBranch}${suffix}`;
 }
 
-// Branch used for a single release PR that bundles a group of components together (see README.md, "Combined
-// release pull requests"). For the same `targetBranch` and `groupId`, this is identical to
-// `releaseBranchName(targetBranch, groupId)` — that's why a `releaseGroup` value can never equal a configured
+// Branch used for a single release PR that bundles a group of components together (see README.md, "Release
+// groups"). For the same `targetBranch` and `groupId`, this is identical to
+// `releaseBranchName(targetBranch, groupId)` — that's why a release group's name can never equal a configured
 // component's own name (validated in manifestConfig.ts): it's the only way this could collide with a real
 // component's own branch. Distinct from `releaseBranchName(targetBranch, "")` (the root component's own branch),
 // so a grouped PR can never be mistaken for the root/single-project branch either.

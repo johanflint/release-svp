@@ -9,6 +9,10 @@ const COMMIT_SHA_PATTERN = /^[0-9a-f]{40}$/i;
 
 export interface ManifestConfig {
     readonly targetBranch?: string;
+    // Components that share one release pull request — see README.md ("Release groups").
+    readonly releaseGroups?: readonly ReleaseGroupConfig[];
+    // Components that each get their own release pull request. Never includes a release group's components — use
+    // `allComponents` for every configured component.
     readonly components: readonly ComponentConfig[];
     // Present only for repositories migrating from single-project to multi-component mode — see README.md
     // ("Migrating an existing repository to multiple components").
@@ -19,6 +23,15 @@ export interface ManifestConfig {
 // branch when the config doesn't specify one), as produced once resolution has happened.
 export type ResolvedManifestConfig = Omit<ManifestConfig, "targetBranch"> & { readonly targetBranch: string };
 
+// Components bundled into one release pull request. Grouping only affects the pull request lifecycle: each member
+// still gets its own independently computed version, changelog and tag. Always has at least 2 components.
+export interface ReleaseGroupConfig {
+    // Used for the group's branch name and pull request title, so it follows the same rules as a component name
+    // and never equals one (see componentNaming.ts, `groupReleaseBranchName`).
+    readonly name: string;
+    readonly components: readonly ComponentConfig[];
+}
+
 export interface ComponentConfig {
     // Directory (relative to the repository root) this component owns, normalized without leading/trailing slashes.
     // An empty string means the component owns the repository root (and anything not claimed by a more specific path).
@@ -27,11 +40,6 @@ export interface ComponentConfig {
     // without losing release history.
     readonly component: string;
     readonly releaseType: string;
-    // Components sharing the same `releaseGroup` value are bundled into one release pull request together — see
-    // README.md ("Release groups"). Grouping only affects the pull request lifecycle: each component still gets
-    // its own independently computed version, changelog and tag. A component without `releaseGroup`, or the only
-    // member of its group, always gets its own release pull request.
-    readonly releaseGroup?: string;
     // When set, every release computed for this component carries this SemVer pre-release identifier (e.g.
     // "beta", "rc.1") — see README.md ("Pre-releases"). Removing this field (or never setting it) always
     // produces a stable release, regardless of what pre-release identifier a previous release/tag carried; this
@@ -54,6 +62,12 @@ export interface MigrationConfig {
     // Starting version for every other named, non-root component (one that has no pre-migration history to
     // inherit). Required for every such component so nobody silently starts at 0.0.0.
     readonly bootstrapVersions?: Readonly<Record<string, string>>;
+}
+
+// Every configured component, grouped or not: release groups' components first, in config order, then the
+// ungrouped ones.
+export function allComponents(config: Pick<ManifestConfig, "releaseGroups" | "components">): ComponentConfig[] {
+    return [...(config.releaseGroups ?? []).flatMap(group => group.components), ...config.components];
 }
 
 export class ManifestConfigError extends Error {
@@ -87,56 +101,131 @@ export function parseManifestConfig(content: string): ManifestConfig {
         }
     }
 
-    if (!("components" in raw) || !Array.isArray(raw.components) || raw.components.length === 0) {
-        issues.push("'components' must be a non-empty array");
-        throw new ManifestConfigError(issues);
+    if ("separatePullRequests" in raw) {
+        issues.push("'separatePullRequests' is no longer supported: every component outside 'releaseGroups' gets its own release pull request — remove the field, and use 'releaseGroups' to bundle components that release together");
     }
 
     const validTypes = strategyTypes();
     const seenComponentNames = new Set<string>();
     const seenPaths = new Set<string>();
-    const components: ComponentConfig[] = [];
+    const parseComponents = (entries: readonly unknown[], location: string): ComponentConfig[] => {
+        const components: ComponentConfig[] = [];
+        entries.forEach((entry, index) => {
+            const componentLocation = `${location}[${index}]`;
+            const component = parseComponent(entry, componentLocation, validTypes, issues);
+            if (!component) {
+                return;
+            }
 
-    raw.components.forEach((entry, index) => {
-        const component = parseComponent(entry, index, validTypes, issues);
-        if (!component) {
-            return;
-        }
+            if (seenComponentNames.has(component.component)) {
+                issues.push(`${componentLocation}: duplicate component name '${component.component}'`);
+            } else {
+                seenComponentNames.add(component.component);
+            }
 
-        if (seenComponentNames.has(component.component)) {
-            issues.push(`components[${index}]: duplicate component name '${component.component}'`);
+            if (seenPaths.has(component.path)) {
+                issues.push(`${componentLocation}: duplicate path '${component.path || "."}'`);
+            } else {
+                seenPaths.add(component.path);
+            }
+
+            components.push(component);
+        });
+        return components;
+    };
+
+    const releaseGroups: ReleaseGroupConfig[] = [];
+    if ("releaseGroups" in raw) {
+        if (!Array.isArray(raw.releaseGroups)) {
+            issues.push("'releaseGroups' must be an array when present");
         } else {
-            seenComponentNames.add(component.component);
+            raw.releaseGroups.forEach((entry, index) => {
+                const group = parseReleaseGroup(entry, `releaseGroups[${index}]`, parseComponents, issues);
+                if (group) {
+                    releaseGroups.push(group);
+                }
+            });
         }
-
-        if (seenPaths.has(component.path)) {
-            issues.push(`components[${index}]: duplicate path '${component.path || "."}'`);
-        } else {
-            seenPaths.add(component.path);
-        }
-
-        components.push(component);
-    });
-
-    const migration = "migration" in raw ? parseMigrationConfig(raw.migration, components, issues) : undefined;
-
-    if ("separatePullRequests" in raw) {
-        issues.push("'separatePullRequests' is no longer supported: every component without a 'releaseGroup' now gets its own release pull request — remove the field, and use 'releaseGroup' to bundle components that release together");
     }
 
-    // A `releaseGroup` value sharing a name with a configured component would make that group's branch collide
-    // with the component's own branch (see componentNaming.ts, `groupReleaseBranchName`).
-    for (const component of components) {
-        if (component.releaseGroup && seenComponentNames.has(component.releaseGroup)) {
-            issues.push(`components: 'releaseGroup' value '${component.releaseGroup}' (on component '${component.component}') must not match a configured component name`);
+    let components: ComponentConfig[] = [];
+    if ("components" in raw) {
+        if (!Array.isArray(raw.components)) {
+            issues.push("'components' must be an array when present");
+        } else {
+            components = parseComponents(raw.components, "components");
         }
     }
+
+    const declaredGroupCount = Array.isArray(raw.releaseGroups) ? raw.releaseGroups.length : 0;
+    const declaredComponentCount = Array.isArray(raw.components) ? raw.components.length : 0;
+    if (declaredGroupCount === 0 && declaredComponentCount === 0) {
+        issues.push("'components' and 'releaseGroups' must declare at least one component between them");
+    }
+    const everyComponent = allComponents({ releaseGroups, components });
+
+    // A release group sharing a name with a component would make the group's branch collide with the component's
+    // own branch (see componentNaming.ts, `groupReleaseBranchName`).
+    const seenGroupNames = new Set<string>();
+    for (const group of releaseGroups) {
+        if (seenGroupNames.has(group.name)) {
+            issues.push(`releaseGroups: duplicate release group name '${group.name}'`);
+        }
+        seenGroupNames.add(group.name);
+
+        if (seenComponentNames.has(group.name)) {
+            issues.push(`releaseGroups: release group name '${group.name}' must not match a configured component name`);
+        }
+    }
+
+    const migration = "migration" in raw ? parseMigrationConfig(raw.migration, everyComponent, issues) : undefined;
 
     if (issues.length > 0) {
         throw new ManifestConfigError(issues);
     }
 
-    return { targetBranch, components, migration };
+    return { targetBranch, releaseGroups, components, migration };
+}
+
+function parseReleaseGroup(
+    entry: unknown,
+    location: string,
+    parseComponents: (entries: readonly unknown[], location: string) => ComponentConfig[],
+    issues: string[],
+): ReleaseGroupConfig | undefined {
+    if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
+        issues.push(`${location}: expected an object`);
+        return undefined;
+    }
+
+    const raw = entry as Record<string, unknown>;
+    let name: string | undefined;
+    if (typeof raw.name !== "string" || raw.name.trim() === "") {
+        issues.push(`${location}: 'name' must be a non-empty string`);
+    } else if (!COMPONENT_NAME_PATTERN.test(raw.name)) {
+        issues.push(`${location}: 'name' must only contain letters, digits, '.', '_' or '-' (got '${raw.name}')`);
+    } else {
+        name = raw.name;
+    }
+
+    if (!Array.isArray(raw.components)) {
+        issues.push(`${location}: 'components' must be an array`);
+        return undefined;
+    }
+
+    const components = parseComponents(raw.components, `${location}.components`);
+    if (raw.components.length < 2) {
+        const hint = components.length === 1
+            ? ` — move '${components[0].component}' to the top-level 'components' (merge or close this group's open release pull request first)`
+            : "";
+        issues.push(`${location}: a release group must have at least 2 components${hint}`);
+    }
+
+    if (!name) {
+        return undefined;
+    }
+
+    return { name, components };
 }
 
 function parseMigrationConfig(entry: unknown, components: readonly ComponentConfig[], issues: string[]): MigrationConfig | undefined {
@@ -228,9 +317,9 @@ function isValidVersionString(value: string): boolean {
     }
 }
 
-function parseComponent(entry: unknown, index: number, validTypes: readonly string[], issues: string[]): ComponentConfig | undefined {
+function parseComponent(entry: unknown, location: string, validTypes: readonly string[], issues: string[]): ComponentConfig | undefined {
     if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
-        issues.push(`components[${index}]: expected an object`);
+        issues.push(`${location}: expected an object`);
         return undefined;
     }
 
@@ -238,40 +327,32 @@ function parseComponent(entry: unknown, index: number, validTypes: readonly stri
     let valid = true;
 
     if (typeof raw.path !== "string") {
-        issues.push(`components[${index}]: 'path' must be a string`);
+        issues.push(`${location}: 'path' must be a string`);
         valid = false;
     }
 
     if (typeof raw.component !== "string" || raw.component.trim() === "") {
-        issues.push(`components[${index}]: 'component' must be a non-empty string`);
+        issues.push(`${location}: 'component' must be a non-empty string`);
         valid = false;
     } else if (!COMPONENT_NAME_PATTERN.test(raw.component)) {
-        issues.push(`components[${index}]: 'component' must only contain letters, digits, '.', '_' or '-' (got '${raw.component}')`);
+        issues.push(`${location}: 'component' must only contain letters, digits, '.', '_' or '-' (got '${raw.component}')`);
         valid = false;
     }
 
     if (typeof raw.releaseType !== "string" || !validTypes.includes(raw.releaseType)) {
-        issues.push(`components[${index}]: 'releaseType' must be one of [${validTypes.join(", ")}] (got '${raw.releaseType}')`);
+        issues.push(`${location}: 'releaseType' must be one of [${validTypes.join(", ")}] (got '${raw.releaseType}')`);
         valid = false;
     }
 
-    let releaseGroup: string | undefined;
     if ("releaseGroup" in raw) {
-        if (typeof raw.releaseGroup !== "string" || raw.releaseGroup.trim() === "") {
-            issues.push(`components[${index}]: 'releaseGroup' must be a non-empty string when present`);
-            valid = false;
-        } else if (!COMPONENT_NAME_PATTERN.test(raw.releaseGroup)) {
-            issues.push(`components[${index}]: 'releaseGroup' must only contain letters, digits, '.', '_' or '-' (got '${raw.releaseGroup}')`);
-            valid = false;
-        } else {
-            releaseGroup = raw.releaseGroup;
-        }
+        issues.push(`${location}: 'releaseGroup' is no longer supported — move the component into a 'releaseGroups' entry instead`);
+        valid = false;
     }
 
     let prereleaseType: string | undefined;
     if ("prereleaseType" in raw) {
         if (typeof raw.prereleaseType !== "string" || !isValidPrereleaseIdentifier(raw.prereleaseType)) {
-            issues.push(`components[${index}]: 'prereleaseType' must be a valid SemVer pre-release identifier (e.g. 'beta', 'rc.1') when present (got '${raw.prereleaseType}')`);
+            issues.push(`${location}: 'prereleaseType' must be a valid SemVer pre-release identifier (e.g. 'beta', 'rc.1') when present (got '${raw.prereleaseType}')`);
             valid = false;
         } else {
             prereleaseType = raw.prereleaseType;
@@ -282,7 +363,7 @@ function parseComponent(entry: unknown, index: number, validTypes: readonly stri
         return undefined;
     }
 
-    const path = normalizePath(raw.path as string, index, issues);
+    const path = normalizePath(raw.path as string, location, issues);
     if (path === undefined) {
         return undefined;
     }
@@ -291,22 +372,21 @@ function parseComponent(entry: unknown, index: number, validTypes: readonly stri
         path,
         component: raw.component as string,
         releaseType: raw.releaseType as string,
-        releaseGroup,
         prereleaseType,
     };
 }
 
-function normalizePath(path: string, index: number, issues: string[]): string | undefined {
+function normalizePath(path: string, location: string, issues: string[]): string | undefined {
     const segments = path.split("/").filter(segment => segment !== "" && segment !== ".");
 
     // A path of only slashes/dots (e.g. "/", ".", "./") resolves to the root, which is relative by definition.
     if (path.startsWith("/") && segments.length > 0) {
-        issues.push(`components[${index}]: 'path' must be relative, not absolute (got '${path}')`);
+        issues.push(`${location}: 'path' must be relative, not absolute (got '${path}')`);
         return undefined;
     }
 
     if (segments.includes("..")) {
-        issues.push(`components[${index}]: 'path' must not contain '..' (got '${path}')`);
+        issues.push(`${location}: 'path' must not contain '..' (got '${path}')`);
         return undefined;
     }
 

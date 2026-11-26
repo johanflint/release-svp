@@ -71,8 +71,8 @@ describe("scenario: cumulative migration journey", () => {
         expect(state.releases.map(release => release.tagName).sort()).toEqual(["v0.1.0", "core-v0.1.1", "api-v0.2.0"].sort());
 
         // ===== Phase 3: second migration — group "core" + "api" into "platform", add "web" and "docs" =====
-        const groupedCore = rustComponent("core", { path: "", releaseGroup: "platform" });
-        const groupedApi = rustComponent("api", { releaseGroup: "platform" });
+        const groupedCore = rustComponent("core", { path: "" });
+        const groupedApi = rustComponent("api");
         const web = rustComponent("web");
         const docs = rustComponent("docs");
 
@@ -80,7 +80,8 @@ describe("scenario: cumulative migration journey", () => {
         // `firstCutoverCommit` from phase 2 — it doesn't need to reference this commit's own sha — so the new
         // scaffolding and the updated config can land in one single commit.
         const configV3: ManifestConfig = {
-            components: [groupedCore, groupedApi, web, docs],
+            releaseGroups: [{ name: "platform", components: [groupedCore, groupedApi] }],
+            components: [web, docs],
             migration: {
                 cutoverCommit: firstCutoverCommit,
                 legacyRootSuccessor: "core",

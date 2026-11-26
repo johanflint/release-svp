@@ -33,11 +33,11 @@ describe("scenario: release group + standalone component", () => {
         harness = await createHarness();
         const { state } = harness;
 
-        const alpha = rustComponent("alpha", { releaseGroup: "platform" });
-        const beta = rustComponent("beta", { releaseGroup: "platform" });
+        const alpha = rustComponent("alpha");
+        const beta = rustComponent("beta");
         const tools = rustComponent("tools");
 
-        const config: ManifestConfig = { components: [alpha, beta, tools] };
+        const config: ManifestConfig = { releaseGroups: [{ name: "platform", components: [alpha, beta] }], components: [tools] };
         state.seedCommit({
             message: "chore: initial commit",
             files: {

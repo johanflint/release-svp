@@ -7,8 +7,8 @@ import { createPullRequestBody } from "../src/pullRequestBody";
 import { ReleaseUnit } from "../src/releaseUnit";
 import { Version } from "../src/version";
 
-function component(name: string, releaseGroup?: string): ComponentConfig {
-    return { path: name, component: name, releaseType: "node", releaseGroup };
+function component(name: string): ComponentConfig {
+    return { path: name, component: name, releaseType: "node" };
 }
 
 function candidate(componentName: string, version: string, changelog: string, updates: ComponentCandidate["updates"] = []): ComponentCandidate {

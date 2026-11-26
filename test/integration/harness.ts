@@ -108,12 +108,11 @@ export function packageLockJson(packageName: string, version: string): string {
 
 // Builds a minimal, valid rust-strategy component config. `path` defaults to `component` (the common case: a
 // component's directory is named after it) — pass `path` explicitly when they should differ.
-export function rustComponent(component: string, overrides?: { path?: string; releaseGroup?: string; prereleaseType?: string }): ComponentConfig {
+export function rustComponent(component: string, overrides?: { path?: string; prereleaseType?: string }): ComponentConfig {
     return {
         path: overrides?.path ?? component,
         component,
         releaseType: "rust",
-        releaseGroup: overrides?.releaseGroup,
         prereleaseType: overrides?.prereleaseType,
     };
 }
