@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_RELEASE_GROUP_ID, groupReleaseBranchName, pendingLabel, releaseBranchName, taggedLabel, tagPrefix } from "../src/componentNaming";
+import { groupReleaseBranchName, pendingLabel, releaseBranchName, taggedLabel, tagPrefix } from "../src/componentNaming";
 
 describe("componentNaming", () => {
     describe("tagPrefix", () => {
@@ -28,15 +28,14 @@ describe("componentNaming", () => {
 
     describe("groupReleaseBranchName", () => {
         it("is distinct from the root component's own branch name", () => {
-            expect(groupReleaseBranchName("main", DEFAULT_RELEASE_GROUP_ID)).not.toBe(releaseBranchName("main", ""));
+            expect(groupReleaseBranchName("main", "product-a")).not.toBe(releaseBranchName("main", ""));
         });
 
         it("is distinct from a named component's branch name", () => {
-            expect(groupReleaseBranchName("main", DEFAULT_RELEASE_GROUP_ID)).not.toBe(releaseBranchName("main", "api"));
+            expect(groupReleaseBranchName("main", "product-a")).not.toBe(releaseBranchName("main", "api"));
         });
 
         it("is identical to releaseBranchName(targetBranch, groupId) — why a group id can never match a component name (see manifestConfig.ts)", () => {
-            expect(groupReleaseBranchName("main", "combined")).toBe(releaseBranchName("main", "combined"));
             expect(groupReleaseBranchName("main", "product-a")).toBe(releaseBranchName("main", "product-a"));
         });
 

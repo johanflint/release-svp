@@ -58,7 +58,6 @@ describe("scenario: legacy-successor migration", () => {
         // Step 2: add release-svp-config.json, now that the cutover commit's sha is known.
         const config: ManifestConfig = {
             components: [core, api],
-            separatePullRequests: true, // keep each component on its own pull request (grouping is scenario 3's concern)
             migration: {
                 cutoverCommit,
                 legacyRootSuccessor: "core",
@@ -88,7 +87,7 @@ describe("scenario: legacy-successor migration", () => {
         expect(await (await harness.createRunner()).prepare()).toBe(true);
 
         const openPrs = state.pullRequests.filter(pr => pr.state === "open");
-        expect(openPrs).toHaveLength(2); // one per component, thanks to separatePullRequests
+        expect(openPrs).toHaveLength(2); // one per component, since neither declares a releaseGroup
 
         const corePr = openPrs.find(pr => pr.labels.includes(pendingLabel("core")))!;
         const apiPr = openPrs.find(pr => pr.labels.includes(pendingLabel("api")))!;

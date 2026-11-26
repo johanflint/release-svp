@@ -9,34 +9,22 @@ function component(component: string, releaseGroup?: string): ComponentConfig {
 describe("computeReleaseUnits", () => {
     it("returns a singleton unit for a single configured (root) component", () => {
         const root = component("");
-        const units = computeReleaseUnits([root], "main", undefined);
+        const units = computeReleaseUnits([root], "main");
 
         expect(units).toEqual([{ branchName: "release-svp--branches-main", members: [root] }]);
     });
 
-    it("returns a singleton unit when only one component is configured, even with separatePullRequests unset", () => {
+    it("returns a singleton unit when only one component is configured", () => {
         const api = component("api");
-        const units = computeReleaseUnits([api], "main", undefined);
+        const units = computeReleaseUnits([api], "main");
 
         expect(units).toEqual([{ branchName: "release-svp--branches-main--api", members: [api] }]);
     });
 
-    it("combines every component into one implicit default unit when no releaseGroup is declared", () => {
+    it("keeps every ungrouped component as its own singleton unit", () => {
         const api = component("api");
         const web = component("web");
-        const units = computeReleaseUnits([api, web], "main", undefined);
-
-        expect(units).toEqual([{
-            groupId: "combined",
-            branchName: "release-svp--branches-main--combined",
-            members: [api, web],
-        }]);
-    });
-
-    it("keeps every component as its own singleton unit when separatePullRequests is true and no releaseGroup is declared", () => {
-        const api = component("api");
-        const web = component("web");
-        const units = computeReleaseUnits([api, web], "main", true);
+        const units = computeReleaseUnits([api, web], "main");
 
         expect(units).toEqual([
             { branchName: "release-svp--branches-main--api", members: [api] },
@@ -47,7 +35,7 @@ describe("computeReleaseUnits", () => {
     it("groups components sharing the same releaseGroup into one unit", () => {
         const ios = component("ios-client", "product-a");
         const android = component("android-client", "product-a");
-        const units = computeReleaseUnits([ios, android], "main", undefined);
+        const units = computeReleaseUnits([ios, android], "main");
 
         expect(units).toEqual([{
             groupId: "product-a",
@@ -60,7 +48,7 @@ describe("computeReleaseUnits", () => {
         const ios = component("ios-client", "product-a");
         const android = component("android-client", "product-a");
         const standalone = component("standalone");
-        const units = computeReleaseUnits([ios, android, standalone], "main", undefined);
+        const units = computeReleaseUnits([ios, android, standalone], "main");
 
         expect(units).toEqual([
             { branchName: "release-svp--branches-main--standalone", members: [standalone] },
@@ -73,7 +61,7 @@ describe("computeReleaseUnits", () => {
         const android = component("android-client", "product-a");
         const web1 = component("web-client-1", "product-b");
         const web2 = component("web-client-2", "product-b");
-        const units = computeReleaseUnits([ios, android, web1, web2], "main", undefined);
+        const units = computeReleaseUnits([ios, android, web1, web2], "main");
 
         expect(units).toEqual([
             { groupId: "product-a", branchName: "release-svp--branches-main--product-a", members: [ios, android] },
@@ -84,7 +72,7 @@ describe("computeReleaseUnits", () => {
     it("returns a genuine singleton unit (no groupId, plain branch name) for a releaseGroup declared by only one component", () => {
         const standalone = component("standalone", "solo-group");
         const other = component("other");
-        const units = computeReleaseUnits([standalone, other], "main", undefined);
+        const units = computeReleaseUnits([standalone, other], "main");
 
         expect(units).toEqual([
             { branchName: "release-svp--branches-main--other", members: [other] },
@@ -98,7 +86,7 @@ describe("computeReleaseUnits", () => {
         const ios = component("ios-client", "product-a");
         const web1 = component("web-client-1", "product-b");
         const web2 = component("web-client-2", "product-b");
-        const units = computeReleaseUnits([ios, web1, web2], "main", undefined);
+        const units = computeReleaseUnits([ios, web1, web2], "main");
 
         expect(units).toEqual([
             { branchName: "release-svp--branches-main--ios-client", members: [ios] },
