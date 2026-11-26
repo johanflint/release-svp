@@ -74,7 +74,8 @@ jobs:
       # Authenticates via npm Trusted Publishing (OIDC, using the `id-token: write` permission above) —
       # no npm token/secret needed. The trusted publisher is configured as stage-only on npmjs.com, so this
       # stages the version rather than publishing it live; a maintainer must promote it afterwards with
-      # `npm publish --otp=<code>` (2FA), or via the npmjs.com package page, before it's publicly installable.
+      # `npm stage approve <stage-id>` (2FA, see `npm stage list`), or via the npmjs.com package page, before it's
+      # publicly installable.
       # Pre-release versions (e.g. `0.2.0-rc.1`) must not take the default `latest` dist-tag, or a plain
       # `npm install release-svp` would pick them up. The tag is the first pre-release identifier (`rc`, `beta`).
       - name: Determine npm dist-tag
@@ -88,6 +89,11 @@ jobs:
           else
             echo "tag=latest" >> "$GITHUB_OUTPUT"
           fi
+
+      # `npm stage` needs npm >= 11.15, newer than the npm bundled with Node 22 (npm 10).
+      - name: Install a recent npm
+        if: steps.check_tag.outputs.tagged == 'true'
+        run: npm install -g npm@11
 
       - name: Stage publish to npm
         if: steps.check_tag.outputs.tagged == 'true'
