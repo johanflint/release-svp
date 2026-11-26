@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.3.0 (2026-11-26)
+
+### Features
+
+- Configure release groups in a top-level releaseGroups list ([#33](https://github.com/johanflint/release-svp/pull/33))
+- Give each component its own release pull request by default ([#32](https://github.com/johanflint/release-svp/pull/32))
+
+### Build System
+
+- Upgrade npm for staged publishing ([#30](https://github.com/johanflint/release-svp/pull/30))
+
 ## v0.2.0 (2026-11-23)
 
 ### Features
