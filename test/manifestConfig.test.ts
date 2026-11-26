@@ -115,6 +115,21 @@ describe("parseManifestConfig", () => {
         }))).toThrow(/duplicate path 'b'/);
     });
 
+    it.each([
+        ["the top level", { releaseGroup: {}, components: [{ path: "a", component: "a", releaseType: "rust" }] }, "unknown field 'releaseGroup'"],
+        ["a release group", { releaseGroups: [{ name: "g", linked: true, components: [{ path: "a", component: "a", releaseType: "rust" }, { path: "b", component: "b", releaseType: "rust" }] }] }, "releaseGroups[0]: unknown field 'linked'"],
+        ["a component", { components: [{ path: "a", component: "a", releaseType: "rust", prereleseType: "beta" }] }, "components[0]: unknown field 'prereleseType'"],
+        ["migration", { components: [{ path: "a", component: "a", releaseType: "rust" }], migration: { cutoverCommit: "abcdef0123456789abcdef0123456789abcdef01", bootstrapVersions: { a: "0.1.0" }, cutover: "x" } }, "'migration': unknown field 'cutover'"],
+    ])("throws for an unknown field on %s", (_, config, issue) => {
+        try {
+            parseManifestConfig(JSON.stringify(config));
+            expect.fail("expected parseManifestConfig to throw");
+        } catch (e) {
+            expect(e).toBeInstanceOf(ManifestConfigError);
+            expect((e as ManifestConfigError).issues).toEqual([issue]);
+        }
+    });
+
     it("collects multiple issues in a single error", () => {
         try {
             parseManifestConfig(JSON.stringify({

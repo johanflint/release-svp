@@ -7,6 +7,10 @@ const COMPONENT_NAME_PATTERN = /^[a-zA-Z0-9](?:[a-zA-Z0-9_.-]*[a-zA-Z0-9])?$/;
 // returned by the GitHub API, so an abbreviated SHA would never match and would silently defeat the cutover.
 const COMMIT_SHA_PATTERN = /^[0-9a-f]{40}$/i;
 
+// Every field of a config interface, so adding, renaming or removing a field there fails to compile until the
+// matching list below is updated too. Used to reject unknown fields (see `rejectUnknownFields`).
+type ConfigFields<T> = Readonly<Record<keyof T, true>>;
+
 export interface ManifestConfig {
     readonly targetBranch?: string;
     // Components that share one release pull request — see README.md ("Release groups").
@@ -64,6 +68,11 @@ export interface MigrationConfig {
     readonly bootstrapVersions?: Readonly<Record<string, string>>;
 }
 
+const MANIFEST_FIELDS: ConfigFields<ManifestConfig> = { targetBranch: true, releaseGroups: true, components: true, migration: true };
+const RELEASE_GROUP_FIELDS: ConfigFields<ReleaseGroupConfig> = { name: true, components: true };
+const COMPONENT_FIELDS: ConfigFields<ComponentConfig> = { path: true, component: true, releaseType: true, prereleaseType: true };
+const MIGRATION_FIELDS: ConfigFields<MigrationConfig> = { cutoverCommit: true, legacyRootSuccessor: true, legacyAnchorTag: true, bootstrapVersions: true };
+
 // Every configured component, grouped or not: release groups' components first, in config order, then the
 // ungrouped ones.
 export function allComponents(config: Pick<ManifestConfig, "releaseGroups" | "components">): ComponentConfig[] {
@@ -91,6 +100,8 @@ export function parseManifestConfig(content: string): ManifestConfig {
     }
 
     const raw = json as Record<string, unknown>;
+    // 'separatePullRequests' was removed, and gets its own, more helpful message below.
+    rejectUnknownFields(raw, { ...MANIFEST_FIELDS, separatePullRequests: true }, undefined, issues);
 
     let targetBranch: string | undefined;
     if ("targetBranch" in raw) {
@@ -199,6 +210,8 @@ function parseReleaseGroup(
     }
 
     const raw = entry as Record<string, unknown>;
+    rejectUnknownFields(raw, RELEASE_GROUP_FIELDS, location, issues);
+
     let name: string | undefined;
     if (typeof raw.name !== "string" || raw.name.trim() === "") {
         issues.push(`${location}: 'name' must be a non-empty string`);
@@ -235,6 +248,8 @@ function parseMigrationConfig(entry: unknown, components: readonly ComponentConf
     }
 
     const raw = entry as Record<string, unknown>;
+    rejectUnknownFields(raw, MIGRATION_FIELDS, "'migration'", issues);
+
     // Note: every component in a parsed config has a non-empty `component` name (see parseComponent) — the
     // "root" concept only exists via `path === ""`, which is orthogonal to this migration bookkeeping (the
     // legacy successor doesn't need to be the root-*path* component; it's whichever component now identifies
@@ -324,6 +339,9 @@ function parseComponent(entry: unknown, location: string, validTypes: readonly s
     }
 
     const raw = entry as Record<string, unknown>;
+    // 'releaseGroup' was removed, and gets its own, more helpful message below.
+    rejectUnknownFields(raw, { ...COMPONENT_FIELDS, releaseGroup: true }, location, issues);
+
     let valid = true;
 
     if (typeof raw.path !== "string") {
@@ -374,6 +392,17 @@ function parseComponent(entry: unknown, location: string, validTypes: readonly s
         releaseType: raw.releaseType as string,
         prereleaseType,
     };
+}
+
+// Fails loudly on a field this version doesn't know, so a typo (e.g. 'releaseGroup' for 'releaseGroups') isn't
+// silently ignored.
+function rejectUnknownFields(raw: Record<string, unknown>, knownFields: Readonly<Record<string, true>>, location: string | undefined, issues: string[]): void {
+    const prefix = location ? `${location}: ` : "";
+    for (const field of Object.keys(raw)) {
+        if (!Object.hasOwn(knownFields, field)) {
+            issues.push(`${prefix}unknown field '${field}'`);
+        }
+    }
 }
 
 function normalizePath(path: string, location: string, issues: string[]): string | undefined {
