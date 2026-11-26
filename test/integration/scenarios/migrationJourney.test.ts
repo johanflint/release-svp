@@ -52,7 +52,6 @@ describe("scenario: cumulative migration journey", () => {
         const firstCutoverCommit = seedCutoverCommit(state, componentFiles(api, "0.1.0"));
         const configV2: ManifestConfig = {
             components: [core, api],
-            separatePullRequests: true,
             migration: {
                 cutoverCommit: firstCutoverCommit,
                 legacyRootSuccessor: "core",

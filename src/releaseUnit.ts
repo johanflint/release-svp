@@ -1,14 +1,14 @@
-import { DEFAULT_RELEASE_GROUP_ID, groupReleaseBranchName, releaseBranchName } from "./componentNaming";
+import { groupReleaseBranchName, releaseBranchName } from "./componentNaming";
 import { ComponentConfig } from "./manifestConfig";
 
 // A statically-partitioned group of components that share one release pull request. Partitioning is based
-// purely on repository configuration (component list + `releaseGroup`/`separatePullRequests`), never on which
-// components happen to have a candidate in any one run — otherwise a component's branch could change from run to
-// run as other components' unreleased-commit status fluctuates, orphaning whatever pull request was already open
-// on its previous branch. See README.md ("Combined release pull requests").
+// purely on repository configuration (component list + `releaseGroup`), never on which components happen to have a
+// candidate in any one run — otherwise a component's branch could change from run to run as other components'
+// unreleased-commit status fluctuates, orphaning whatever pull request was already open on its previous branch.
+// See README.md ("Release groups").
 export interface ReleaseUnit {
-    // Set only for a real (default-or-explicit) group; undefined for a genuine ungrouped singleton, whose
-    // branch/title/labels are unchanged from before this feature existed.
+    // Set only for a real (2+ member) `releaseGroup`; undefined for a singleton, whose branch/title/labels are
+    // unchanged from before release groups existed.
     readonly groupId?: string;
     readonly branchName: string;
     // Every component statically assigned to this unit, regardless of whether it has a candidate in this run —
@@ -17,43 +17,15 @@ export interface ReleaseUnit {
 }
 
 // Partitions every configured component into its release unit — see `ReleaseUnit` for why this never looks at
-// which components currently have a candidate. Rules (see manifestConfig.ts, `ComponentConfig.releaseGroup` /
-// `ManifestConfig.separatePullRequests`, and README.md for the full rationale):
-//  - A single configured component is always its own singleton unit (root/single-project repositories must keep
-//    using the plain, unscoped branch name — never the "combined" group branch).
-//  - Otherwise, if no component declares `releaseGroup` and `separatePullRequests` is set, every component is its
-//    own singleton unit (today's one-pull-request-per-component behaviour).
-//  - Otherwise, if no component declares `releaseGroup`, every component shares one implicit default unit
-//    (`DEFAULT_RELEASE_GROUP_ID`).
-//  - Otherwise (some component(s) declare `releaseGroup`), components sharing the same value form one unit each;
-//    every other, ungrouped component is its own singleton unit — never silently folded into a group or into an
-//    implicit "everyone else" bucket. A `releaseGroup` with exactly one remaining member (declared alone, or left
-//    alone after a sibling was removed from the config) is returned as a genuine singleton unit too (no `groupId`,
-//    plain branch name) — never a single-member "group" unit — so it behaves exactly like an ungrouped component
-//    (see manifestConfig.ts, `ComponentConfig.releaseGroup`) and callers never need to special-case group size.
-export function computeReleaseUnits(
-    allComponents: readonly ComponentConfig[],
-    targetBranch: string,
-    separatePullRequests: boolean | undefined,
-): ReleaseUnit[] {
-    if (allComponents.length <= 1) {
-        return allComponents.map(component => singletonUnit(component, targetBranch));
-    }
-
-    const anyGroupDeclared = allComponents.some(component => component.releaseGroup);
-
-    if (!anyGroupDeclared && separatePullRequests) {
-        return allComponents.map(component => singletonUnit(component, targetBranch));
-    }
-
-    if (!anyGroupDeclared) {
-        return [{
-            groupId: DEFAULT_RELEASE_GROUP_ID,
-            branchName: groupReleaseBranchName(targetBranch, DEFAULT_RELEASE_GROUP_ID),
-            members: allComponents,
-        }];
-    }
-
+// which components currently have a candidate. Rules (see manifestConfig.ts, `ComponentConfig.releaseGroup`, and
+// README.md, "Release groups"):
+//  - A component without `releaseGroup` is always its own singleton unit (one release pull request per component).
+//  - Components sharing the same `releaseGroup` value form one unit each.
+//  - A `releaseGroup` with exactly one remaining member (declared alone, or left alone after a sibling was removed
+//    from the config) is returned as a genuine singleton unit (no `groupId`, plain branch name) — never a
+//    single-member "group" unit — so it behaves exactly like an ungrouped component and callers never need to
+//    special-case group size.
+export function computeReleaseUnits(allComponents: readonly ComponentConfig[], targetBranch: string): ReleaseUnit[] {
     const membersByGroup = new Map<string, ComponentConfig[]>();
     const units: ReleaseUnit[] = [];
     for (const component of allComponents) {
@@ -68,11 +40,6 @@ export function computeReleaseUnits(
     }
 
     for (const [groupId, members] of membersByGroup) {
-        // A releaseGroup with exactly one remaining member (declared alone, or left alone after a sibling was
-        // removed from the config) behaves like an ungrouped component (see manifestConfig.ts,
-        // `ComponentConfig.releaseGroup`) — return a genuine singleton unit (no groupId, plain branch name)
-        // rather than a single-member "group" unit, so callers never need to special-case `members.length === 1`
-        // to get the right branch name; the data is self-consistent by construction.
         if (members.length === 1) {
             units.push(singletonUnit(members[0], targetBranch));
             continue;

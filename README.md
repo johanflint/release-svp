@@ -11,9 +11,8 @@ Not sure which mode applies to you? Pick one:
 | Your repository...                                                      | Use this                                                |
 |---------------------------------------------------------------------------|----------------------------------------------------------|
 | is a single project (one version, one changelog)                          | [Single-project mode](#single-project-mode-no-config-file) — no config file needed |
-| is a monorepo where every component should release together, as one PR    | [Multi-component mode](#multi-component-mode-release-svp-configjson), default combining behaviour |
-| is a monorepo with unrelated products that must NOT share a pull request  | Multi-component mode + [`releaseGroup`](#grouping-by-releasegroup) |
-| is a monorepo where every component must always get its own pull request  | Multi-component mode + [`separatePullRequests`](#opting-out-separatepullrequests) |
+| is a monorepo where every component releases on its own cycle             | [Multi-component mode](#multi-component-mode-release-svp-configjson) — one pull request per component by default |
+| is a monorepo where some components should release together, as one PR    | Multi-component mode + [`releaseGroup`](#release-groups) |
 | already has released versions, but has never used release-svp             | [Adopting release-svp in an existing project](#adopting-release-svp-in-an-existing-project) |
 | already has release history and is only now being split into components  | [Migrating an existing repository](#migrating-an-existing-repository-to-multiple-components) |
 | needs a component to publish beta/rc versions instead of stable releases  | [Pre-releases](#pre-releases) via `prereleaseType` |
@@ -117,35 +116,16 @@ To release multiple independently-versioned components from a single repository 
   does not fail the run, since it may be intentional.
 - Each component is versioned, changelogged and tagged fully independently: a single pull request touching both
   `a/` and `b/` can result in two separate releases in the same cycle, each with its own changelog file, tag
-  namespace, and GitHub Release page entry. By default they share one release *pull request* — see "Combined
-  release pull requests" below for how that's controlled.
+  namespace, and GitHub Release page entry. By default each component also gets its own release *pull request*
+  — see "Release groups" below to bundle components into one.
 
-## Combined release pull requests
+## Release groups
 
-By default, when 2 or more components have unreleased changes at the same time, release-svp bundles them into
-**one shared release pull request** instead of opening one per component. Each component still gets its own,
-fully independent version bump, changelog and tag — grouping only affects the pull request itself, which now
-has one section per component (each clearly marked, so it's still obvious what's being released):
-
-```json
-{
-  "components": [
-    { "component": "ios-client", "path": "ios", "releaseType": "rust" },
-    { "component": "android-client", "path": "android", "releaseType": "rust" }
-  ]
-}
-```
-
-If both components have unreleased changes, they share one pull request titled `Release <repo>`. If only one
-does, that component still gets its own pull request, titled `Release <component> v<version>` — nothing is held
-back waiting for the other.
-
-### Grouping by `releaseGroup`
-
-A monorepo can also host unrelated products (or a mix of shared and standalone parts) that shouldn't all be
-bundled together just because they happen to release at the same time. Set `releaseGroup` on a component to
-control this explicitly — components sharing the same `releaseGroup` value are bundled together, independently
-of any other component:
+By default, every component gets **its own release pull request**, so each one follows its own release cycle.
+To release components together, give them the same `releaseGroup`: they then share **one release pull request**.
+Each component still gets its own, fully independent version bump, changelog and tag — grouping only affects the
+pull request itself, which has one section per component (each clearly marked, so it's still obvious what's
+being released):
 
 ```json
 {
@@ -157,12 +137,11 @@ of any other component:
 }
 ```
 
-Here, `ios-client` and `android-client` always share one pull request titled `Release mobile`, while `backend`
-(no `releaseGroup`) always gets its own pull request titled `Release backend v<version>`, regardless of whether
-the other two have changes. A `releaseGroup` with only one member behaves exactly like an ungrouped component. A
-component without `releaseGroup` is never folded into another component's group, nor into the default "everyone
-with changes" bundle above — once any component in the repository declares a `releaseGroup`, that grouping is
-used everywhere and the "bundle everyone with changes" default no longer applies to any component.
+Here, `ios-client` and `android-client` always share one pull request titled `Release mobile`, on the branch
+`release-svp--branches-<target>--mobile`, even when only one of them has unreleased changes. `backend` (no
+`releaseGroup`) always gets its own pull request titled `Release backend v<version>`, regardless of whether the
+other two have changes. A `releaseGroup` with only one member behaves exactly like an ungrouped component. A
+`releaseGroup` value must not equal a component name, so a group's branch never collides with a component's own.
 
 ### Pull request titles
 
@@ -172,36 +151,31 @@ repository can be told apart at a glance without opening each one:
   — there's nothing else configured to disambiguate against.
 - A multi-component repository's own singleton pull request (a component with no `releaseGroup`, or a
   `releaseGroup` that ends up with only one member): `Release <component> v<version>`.
-- A combined/grouped pull request (2+ components sharing one pull request): `Release <group>` — no version,
-  since each member is versioned independently.
+- A grouped pull request (2+ components sharing one pull request): `Release <group>` — no version, since each
+  member is versioned independently.
 
-### Opting out: `separatePullRequests`
+### Upgrading from `separatePullRequests`
 
-To keep one-pull-request-per-component behaviour instead, with no bundling at all, set:
-
-```json
-{ "separatePullRequests": true, "components": [ { "component": "project-a", "path": "a", "releaseType": "rust" } ] }
-```
-
-This is a repository-wide escape hatch — it's rejected by config validation if any component also declares
-`releaseGroup`, since the two would otherwise have unclear precedence. It's meaningless (ignored) for
-single-component repositories, where there's only ever one pull request either way.
+Earlier versions bundled every component into one implicit `combined` pull request unless
+`separatePullRequests: true` was set. That default is gone: `separatePullRequests` is now rejected by config
+validation — remove it, and use `releaseGroup` for components that should still share a pull request. If a
+`release-svp--branches-<target>--combined` pull request is still open when you upgrade, `prepare` fails until
+it's merged or closed (see below).
 
 ### Frozen membership and orphaned components
 
-Once a combined pull request is open, its set of components is "frozen": a component that simply has no new
+Once a grouped pull request is open, its set of components is "frozen": a component that simply has no new
 commits yet is carried forward unchanged in the pull request body, never silently dropped. If a component that
-already has a section in an open combined pull request is removed from the config, or moved to a different
+already has a section in an open grouped pull request is removed from the config, or moved to a different
 `releaseGroup`, the affected unit's run fails loudly instead of silently discarding its section — merge or close
 the existing pull request, or restore the component's group, before the next run.
 
 ### Rolling out to an existing repository
 
-Enabling this on a repository that already has open, per-component release pull requests from before this
-feature existed is safe to do at any time: the combined pull request lives on its own, separately-named branch
-(`release-svp--branches-<target>--<group>`), which never collides with an individual component's own branch. Any
-already-open per-component pull request is simply left alone — merge or close it as usual — while future runs
-start using combined pull requests going forward.
+A grouped pull request lives on its own, separately-named branch (`release-svp--branches-<target>--<group>`),
+which never collides with an individual component's own branch. If a component that joins a group (or leaves
+one) still has an open release pull request on its previous branch, `prepare` refuses to prepare any release and
+fails with a pointer to that pull request — merge or close it, and the next run picks up the new grouping.
 
 ## Pre-releases
 

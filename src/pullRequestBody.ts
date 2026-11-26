@@ -32,7 +32,7 @@ ${FOOTER}`;
 }
 
 // Marks the start/end of one component's release notes within a pull request body, so a single pull request
-// covering several components (see README.md, "Combined release pull requests") can be parsed per-component
+// covering several components (see README.md, "Release groups") can be parsed per-component
 // instead of the whole content being treated as one block. HTML comments so they render invisibly on GitHub.
 // `componentName` is "" for the root component (single-project, backward-compatible naming — see
 // componentNaming.ts).

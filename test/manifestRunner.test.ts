@@ -296,7 +296,6 @@ describe("ManifestRunner", () => {
                             { path: "a", component: "project-a", releaseType: "rust" },
                             { path: "b", component: "project-b", releaseType: "rust" },
                         ],
-                        separatePullRequests: true,
                     }),
                 }),
             });
@@ -328,7 +327,6 @@ describe("ManifestRunner", () => {
                             { path: "a", component: "project-a", releaseType: "rust" },
                             { path: "b", component: "project-b", releaseType: "rust" },
                         ],
-                        separatePullRequests: true,
                     }),
                 }),
             });
@@ -355,7 +353,6 @@ describe("ManifestRunner", () => {
                             { path: "a", component: "project-a", releaseType: "rust" },
                             { path: "b", component: "project-b", releaseType: "rust" },
                         ],
-                        separatePullRequests: true,
                     }),
                 }),
             });
@@ -446,7 +443,7 @@ describe("ManifestRunner", () => {
 
             expect(openOrUpdatePullRequestRoot).toHaveBeenCalledExactlyOnceWith(expect.anything(), "Release v1.0.0");
 
-            // Multi-component mode, no releaseGroup at all, separatePullRequests keeps each its own singleton:
+            // Multi-component mode, no releaseGroup at all, so each component is its own singleton:
             // 2+ components are configured in total, so each singleton pull request's title includes its own
             // component name to tell them apart.
             createGithubMock({
@@ -456,7 +453,6 @@ describe("ManifestRunner", () => {
                             { path: "a", component: "project-a", releaseType: "rust" },
                             { path: "b", component: "project-b", releaseType: "rust" },
                         ],
-                        separatePullRequests: true,
                     }),
                 }),
                 pullRequestIterator: vi.fn().mockImplementation(async function* () {}),
@@ -493,54 +489,14 @@ describe("ManifestRunner", () => {
                 };
             }
 
-            it("opens one combined pull request for two ungrouped components", async () => {
-                const pullRequestIterator = vi.fn().mockImplementation(async function* () {});
-                const createPullRequest = vi.fn().mockResolvedValue({ number: 42 });
-                createGithubMock({
-                    retrieveFileContents: vi.fn().mockResolvedValue({
-                        parsedContent: JSON.stringify({
-                            components: [
-                                { path: "a", component: "project-a", releaseType: "rust" },
-                                { path: "b", component: "project-b", releaseType: "rust" },
-                            ],
-                        }),
-                    }),
-                    pullRequestIterator,
-                    createPullRequest,
-                });
-
-                const result = await ManifestRunner.create("owner/repo", token, undefined, logger);
-                expect(result).not.toBeNull();
-
-                vi.mocked(Manifest.forComponent)
-                    .mockReturnValueOnce({ computeCandidate: vi.fn().mockResolvedValue(candidateFor("project-a", "a/Cargo.toml")) } as unknown as Manifest)
-                    .mockReturnValueOnce({ computeCandidate: vi.fn().mockResolvedValue(candidateFor("project-b", "b/Cargo.toml")) } as unknown as Manifest);
-
-                await expect(result!.prepare()).resolves.toBe(true);
-
-                expect(createPullRequest).toHaveBeenCalledExactlyOnceWith(
-                    expect.objectContaining({
-                        title: "Release repo",
-                        headBranchName: "release-svp--branches-main--combined",
-                        baseBranchName: "main",
-                        labels: ["autorelease: pending (project-a)", "autorelease: pending (project-b)"],
-                    }),
-                    "Release repo",
-                    [
-                        { path: "a/Cargo.toml", createIfMissing: true, updater: expect.anything() },
-                        { path: "b/Cargo.toml", createIfMissing: true, updater: expect.anything() },
-                    ],
-                );
-            });
-
             it("updates the existing combined pull request, carrying forward a member with no new candidate this run", async () => {
                 const existingBody = "<!-- release-svp:component:project-a -->\nOld notes for project-a\n<!-- /release-svp:component:project-a -->";
                 const existingPullRequest = {
                     number: 7,
-                    title: "Release repo",
+                    title: "Release platform",
                     body: `:bowtie: I have created a release\n---\n\n\n${existingBody}\n\n---\nThis pull request was generated with [Release SVP](https://github.com/johanflint/release-svp).`,
                     permalink: "unused",
-                    headBranchName: "release-svp--branches-main--combined",
+                    headBranchName: "release-svp--branches-main--platform",
                     baseBranchName: "main",
                     labels: ["autorelease: pending (project-a)"],
                 };
@@ -552,8 +508,8 @@ describe("ManifestRunner", () => {
                     retrieveFileContents: vi.fn().mockResolvedValue({
                         parsedContent: JSON.stringify({
                             components: [
-                                { path: "a", component: "project-a", releaseType: "rust" },
-                                { path: "b", component: "project-b", releaseType: "rust" },
+                                { path: "a", component: "project-a", releaseType: "rust", releaseGroup: "platform" },
+                                { path: "b", component: "project-b", releaseType: "rust", releaseGroup: "platform" },
                             ],
                         }),
                     }),
@@ -573,11 +529,11 @@ describe("ManifestRunner", () => {
 
                 expect(updatePullRequest).toHaveBeenCalledExactlyOnceWith(
                     expect.objectContaining({
-                        headBranchName: "release-svp--branches-main--combined",
+                        headBranchName: "release-svp--branches-main--platform",
                         labels: ["autorelease: pending (project-a)", "autorelease: pending (project-b)"],
                         body: expect.stringContaining("Old notes for project-a"),
                     }),
-                    "Release repo",
+                    "Release platform",
                     [{ path: "b/Cargo.toml", createIfMissing: true, updater: expect.anything() }],
                 );
             });
@@ -586,10 +542,10 @@ describe("ManifestRunner", () => {
                 const existingBody = "<!-- release-svp:component:project-c -->\nOld notes for project-c\n<!-- /release-svp:component:project-c -->";
                 const existingPullRequest = {
                     number: 7,
-                    title: "Release repo",
+                    title: "Release platform",
                     body: `:bowtie: I have created a release\n---\n\n\n${existingBody}\n\n---\nThis pull request was generated with [Release SVP](https://github.com/johanflint/release-svp).`,
                     permalink: "unused",
-                    headBranchName: "release-svp--branches-main--combined",
+                    headBranchName: "release-svp--branches-main--platform",
                     baseBranchName: "main",
                     labels: ["autorelease: pending (project-c)"],
                 };
@@ -602,8 +558,8 @@ describe("ManifestRunner", () => {
                     retrieveFileContents: vi.fn().mockResolvedValue({
                         parsedContent: JSON.stringify({
                             components: [
-                                { path: "a", component: "project-a", releaseType: "rust" },
-                                { path: "b", component: "project-b", releaseType: "rust" },
+                                { path: "a", component: "project-a", releaseType: "rust", releaseGroup: "platform" },
+                                { path: "b", component: "project-b", releaseType: "rust", releaseGroup: "platform" },
                             ],
                         }),
                     }),
@@ -623,7 +579,7 @@ describe("ManifestRunner", () => {
                 await expect(result!.prepare()).resolves.toBe(false);
 
                 expect(logger.error).toHaveBeenCalledWith(
-                    "Failed to prepare release for release unit 'combined'",
+                    "Failed to prepare release for release unit 'platform'",
                     expect.objectContaining({ message: expect.stringContaining("project-c") }),
                 );
                 expect(updatePullRequest).not.toHaveBeenCalled();
@@ -648,8 +604,8 @@ describe("ManifestRunner", () => {
                     retrieveFileContents: vi.fn().mockResolvedValue({
                         parsedContent: JSON.stringify({
                             components: [
-                                { path: "a", component: "project-a", releaseType: "rust" },
-                                { path: "b", component: "project-b", releaseType: "rust" },
+                                { path: "a", component: "project-a", releaseType: "rust", releaseGroup: "platform" },
+                                { path: "b", component: "project-b", releaseType: "rust", releaseGroup: "platform" },
                             ],
                         }),
                     }),
@@ -669,6 +625,51 @@ describe("ManifestRunner", () => {
 
                 expect(logger.error).toHaveBeenCalledWith(expect.stringContaining("already tracked by pull request #3"));
                 expect(createPullRequest).not.toHaveBeenCalled();
+            });
+
+            it("aborts the whole run when an ungrouped component is still tracked by a legacy implicit 'combined' pull request", async () => {
+                const legacyBody = [
+                    "<!-- release-svp:component:project-a -->\nNotes for project-a\n<!-- /release-svp:component:project-a -->",
+                    "<!-- release-svp:component:project-b -->\nNotes for project-b\n<!-- /release-svp:component:project-b -->",
+                ].join("\n");
+                const legacyCombinedPullRequest = {
+                    number: 5,
+                    title: "Release repo",
+                    body: legacyBody,
+                    permalink: "unused",
+                    headBranchName: "release-svp--branches-main--combined",
+                    baseBranchName: "main",
+                    labels: ["autorelease: pending (project-a)", "autorelease: pending (project-b)"],
+                };
+                const pullRequestIterator = vi.fn().mockImplementation(async function* () {
+                    yield legacyCombinedPullRequest;
+                });
+                const openOrUpdatePullRequest = vi.fn().mockResolvedValue(undefined);
+                createGithubMock({
+                    retrieveFileContents: vi.fn().mockResolvedValue({
+                        parsedContent: JSON.stringify({
+                            components: [
+                                { path: "a", component: "project-a", releaseType: "rust" },
+                                { path: "b", component: "project-b", releaseType: "rust" },
+                            ],
+                        }),
+                    }),
+                    pullRequestIterator,
+                });
+
+                const result = await ManifestRunner.create("owner/repo", token, undefined, logger);
+                expect(result).not.toBeNull();
+
+                vi.mocked(Manifest.forComponent)
+                    .mockReturnValueOnce({ computeCandidate: vi.fn().mockResolvedValue(candidateFor("project-a", "a/Cargo.toml")), openOrUpdatePullRequest } as unknown as Manifest)
+                    .mockReturnValueOnce({ computeCandidate: vi.fn().mockResolvedValue(candidateFor("project-b", "b/Cargo.toml")), openOrUpdatePullRequest } as unknown as Manifest);
+                vi.spyOn(logger, "error");
+
+                await expect(result!.prepare()).resolves.toBe(false);
+
+                expect(logger.error).toHaveBeenCalledWith(expect.stringContaining("Component 'project-a' is already tracked by pull request #5"));
+                expect(logger.error).toHaveBeenCalledWith(expect.stringContaining("Component 'project-b' is already tracked by pull request #5"));
+                expect(openOrUpdatePullRequest).not.toHaveBeenCalled();
             });
 
             it("opens a combined pull request titled after the releaseGroup for a named group, end-to-end", async () => {
@@ -759,8 +760,8 @@ describe("ManifestRunner", () => {
                     retrieveFileContents: vi.fn().mockResolvedValue({
                         parsedContent: JSON.stringify({
                             components: [
-                                { path: "a", component: "project-a", releaseType: "rust" },
-                                { path: "b", component: "project-b", releaseType: "rust" },
+                                { path: "a", component: "project-a", releaseType: "rust", releaseGroup: "platform" },
+                                { path: "b", component: "project-b", releaseType: "rust", releaseGroup: "platform" },
                             ],
                         }),
                     }),
@@ -785,7 +786,7 @@ describe("ManifestRunner", () => {
                         labels: ["autorelease: pending (project-a)"],
                         body: expect.not.stringContaining("project-b"),
                     }),
-                    "Release repo",
+                    "Release platform",
                     [{ path: "a/Cargo.toml", createIfMissing: true, updater: expect.anything() }],
                 );
             });

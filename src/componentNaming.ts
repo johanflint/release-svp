@@ -20,13 +20,6 @@ export function releaseBranchName(targetBranch: string, componentName: string): 
     return `${RELEASE_BRANCH_PREFIX}${targetBranch}${suffix}`;
 }
 
-// Group id used for the implicit release group containing every component, when no component specifies an
-// explicit `releaseGroup` (see README.md, "Combined release pull requests"). This is why `"combined"` is a
-// reserved component name (see manifestConfig.ts, RESERVED_COMPONENT_NAMES) — it's the only component name that
-// would make `groupReleaseBranchName(targetBranch, DEFAULT_RELEASE_GROUP_ID)` collide with a real component's own
-// branch.
-export const DEFAULT_RELEASE_GROUP_ID = "combined";
-
 // Branch used for a single release PR that bundles a group of components together (see README.md, "Combined
 // release pull requests"). For the same `targetBranch` and `groupId`, this is identical to
 // `releaseBranchName(targetBranch, groupId)` — that's why a `releaseGroup` value can never equal a configured

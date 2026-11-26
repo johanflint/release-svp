@@ -1,5 +1,5 @@
 import { PullRequest } from "./commit";
-import { DEFAULT_RELEASE_GROUP_ID, pendingLabel, releaseBranchName } from "./componentNaming";
+import { pendingLabel, releaseBranchName } from "./componentNaming";
 import { ComponentCandidate } from "./manifest";
 import { ComponentSection, extractComponentSections, parsePullRequestBody } from "./pullRequestBody";
 import { pullRequestCoversComponent } from "./release";
@@ -65,10 +65,9 @@ export function buildCombinedSections(
 // Title for a release unit's pull request. Covers both the singleton case (today's one-pull-request-per-
 // component behaviour) and the combined/grouped case, since which applies depends on repo-wide context (how
 // many components are configured in total) that neither `Manifest` nor `ManifestRunner`'s per-unit dispatch has
-// any reason to duplicate — see README.md ("Combined release pull requests"):
-//  - a genuine multi-member unit (2+ components sharing this pull request): the group name — the repository
-//    name for the implicit default "everyone with changes" group, or the explicit `releaseGroup` value
-//    otherwise — with no version, since each member is versioned independently. `releaseVersion` is ignored.
+// any reason to duplicate — see README.md ("Release groups"):
+//  - a genuine multi-member unit (2+ components sharing this pull request): the `releaseGroup` name, with no
+//    version, since each member is versioned independently. `releaseVersion` is ignored.
 //  - a singleton unit (exactly one member), when 2+ components are configured in total: the member's own
 //    component name plus its version, so that multiple singleton pull requests in the same repository can still
 //    be told apart from their titles alone. `releaseVersion` is required here.
@@ -78,13 +77,12 @@ export function buildCombinedSections(
 export function pullRequestTitle(options: {
     readonly unit: ReleaseUnit;
     readonly totalComponentCount: number;
-    readonly repositoryName: string;
     readonly releaseVersion?: Version;
 }): string {
-    const { unit, totalComponentCount, repositoryName, releaseVersion } = options;
+    const { unit, totalComponentCount, releaseVersion } = options;
 
     if (unit.members.length > 1) {
-        return unit.groupId === DEFAULT_RELEASE_GROUP_ID ? `Release ${repositoryName}` : `Release ${unit.groupId}`;
+        return `Release ${unit.groupId}`;
     }
 
     if (totalComponentCount <= 1) {

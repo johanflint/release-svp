@@ -30,7 +30,7 @@ describe("scenario: retry after a partial prepare failure", () => {
 
         const alpha = rustComponent("alpha");
         const beta = rustComponent("beta");
-        const config: ManifestConfig = { components: [alpha, beta], separatePullRequests: true };
+        const config: ManifestConfig = { components: [alpha, beta] };
         state.seedCommit({
             message: "chore: initial commit",
             files: { ...componentFiles(alpha), ...componentFiles(beta), "release-svp-config.json": configFileContent(config) },

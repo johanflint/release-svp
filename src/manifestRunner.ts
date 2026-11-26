@@ -40,7 +40,6 @@ export class ManifestRunner {
         private readonly targetBranch: string,
         private readonly components: readonly ComponentConfig[],
         private readonly migration?: MigrationConfig,
-        private readonly separatePullRequests?: boolean,
     ) {}
 
     // Returns `false` if any component failed to prepare, so the caller (e.g. the CLI entrypoint) can reflect
@@ -89,7 +88,7 @@ export class ManifestRunner {
             return false;
         }
 
-        const units = computeReleaseUnits(this.components, this.targetBranch, this.separatePullRequests);
+        const units = computeReleaseUnits(this.components, this.targetBranch);
 
         const openPullRequests: PullRequest[] = [];
         for await (const pullRequest of this.github.pullRequestIterator(this.targetBranch, "OPEN")) {
@@ -108,7 +107,7 @@ export class ManifestRunner {
                     if (!candidate) {
                         continue;
                     }
-                    const title = pullRequestTitle({ unit, totalComponentCount: this.components.length, repositoryName: this.repository.repo, releaseVersion: candidate.releaseVersion });
+                    const title = pullRequestTitle({ unit, totalComponentCount: this.components.length, releaseVersion: candidate.releaseVersion });
                     await manifestsByComponent.get(component.component)!.openOrUpdatePullRequest(candidate, title);
                 } else {
                     await this.openOrUpdateCombinedPullRequest(unit, candidatesByComponent, openPullRequests);
@@ -170,7 +169,7 @@ export class ManifestRunner {
         }
 
         const labels = result.sections.map(section => pendingLabel(section.componentName));
-        const title = pullRequestTitle({ unit, totalComponentCount: this.components.length, repositoryName: this.repository.repo });
+        const title = pullRequestTitle({ unit, totalComponentCount: this.components.length });
         const body = createPullRequestBody(result.sections);
 
         const pullRequest: PullRequest = {
@@ -247,7 +246,7 @@ export class ManifestRunner {
             return null;
         }
 
-        return new ManifestRunner(github, repository, resolved.targetBranch, resolved.components, resolved.migration, resolved.separatePullRequests);
+        return new ManifestRunner(github, repository, resolved.targetBranch, resolved.components, resolved.migration);
     }
 
     private static async resolveComponents(
